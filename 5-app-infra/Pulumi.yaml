@@ -1,0 +1,7 @@
+name: foundation-5-app-infra
+description: Ported 5-app-infra from Terraform Foundation
+runtime: go
+config:
+  pulumi:tags:
+    value:
+      pulumi:template: gcp-go

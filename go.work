@@ -1,0 +1,12 @@
+go 1.21
+
+use (
+	./0-bootstrap
+	./1-org
+	./2-environments
+	./3-networks-hub-and-spoke
+	./3-networks-svpc
+	./4-projects
+	./5-app-infra
+	../pulumi-library
+)

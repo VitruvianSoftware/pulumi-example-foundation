@@ -1,0 +1,7 @@
+name: 0-bootstrap
+description: Bootstrap phase of the Pulumi Example Foundation
+runtime: go
+config:
+  pulumi:tags:
+    value:
+      pulumi:template: gcp-go

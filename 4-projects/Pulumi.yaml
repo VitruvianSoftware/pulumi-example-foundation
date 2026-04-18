@@ -1,0 +1,7 @@
+name: foundation-4-projects
+description: Ported 4-projects from Terraform Foundation
+runtime: go
+config:
+  pulumi:tags:
+    value:
+      pulumi:template: gcp-go

@@ -1,0 +1,7 @@
+name: foundation-3-networks-svpc
+description: Ported 3-networks-svpc from Terraform Foundation
+runtime: go
+config:
+  pulumi:tags:
+    value:
+      pulumi:template: gcp-go

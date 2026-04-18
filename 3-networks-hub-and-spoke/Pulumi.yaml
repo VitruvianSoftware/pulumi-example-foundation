@@ -1,0 +1,7 @@
+name: foundation-3-networks-hub-and-spoke
+description: Ported 3-networks-hub-and-spoke from Terraform Foundation
+runtime: go
+config:
+  pulumi:tags:
+    value:
+      pulumi:template: gcp-go

@@ -1,0 +1,7 @@
+name: foundation-1-org
+description: Ported 1-org from Terraform Foundation
+runtime: go
+config:
+  pulumi:tags:
+    value:
+      pulumi:template: gcp-go
