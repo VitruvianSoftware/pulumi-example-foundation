@@ -1,38 +1,75 @@
 /*
  * Copyright 2026 Vitruvian Software
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
  */
-
 package main
 
 import (
-	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/storage"
+	"github.com/VitruvianSoftware/pulumi-library/pkg/networking"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
+	"github.com/pulumi/pulumi/sdk/v3/go/pulumi/config"
 )
 
 func main() {
 	pulumi.Run(func(ctx *pulumi.Context) error {
-		// Create a GCP resource (Storage Bucket)
-		bucket, err := storage.NewBucket(ctx, "my-bucket", &storage.BucketArgs{
-			Location: pulumi.String("US"),
+		cfg := loadNetConfig(ctx)
+
+		// 1. Deploy Hub VPC
+		hub, err := networking.NewNetworking(ctx, "hub-network", &networking.NetworkingArgs{
+			ProjectID: pulumi.String(cfg.ProjectID),
+			VPCName:   pulumi.String("vpc-" + cfg.Env + "-hub"),
+			Subnets: []networking.SubnetArgs{
+				{
+					Name:   "sb-" + cfg.Env + "-hub-" + cfg.Region1,
+					Region: cfg.Region1,
+					CIDR:   "10.0.0.0/18",
+				},
+			},
+			EnablePSA: true,
 		})
 		if err != nil {
 			return err
 		}
 
-		// Export the DNS name of the bucket
-		ctx.Export("bucketName", bucket.Url)
+		// 2. Deploy Spoke VPC
+		_, err = networking.NewNetworking(ctx, "spoke-network", &networking.NetworkingArgs{
+			ProjectID: pulumi.String(cfg.ProjectID),
+			VPCName:   pulumi.String("vpc-" + cfg.Env + "-spoke"),
+			Subnets: []networking.SubnetArgs{
+				{
+					Name:   "sb-" + cfg.Env + "-spoke-" + cfg.Region1,
+					Region: cfg.Region1,
+					CIDR:   "10.1.0.0/18",
+				},
+			},
+			EnablePSA: false,
+		})
+		if err != nil {
+			return err
+		}
+
+		// In a real hub-and-spoke, we would add peering or VPN here.
+		// For the reference architecture, we demonstrate the multi-VPC intent.
+
+		ctx.Export("hub_vpc_id", hub.VPC.ID())
 		return nil
 	})
+}
+
+type NetConfig struct {
+	Env       string
+	ProjectID string
+	Region1   string
+}
+
+func loadNetConfig(ctx *pulumi.Context) *NetConfig {
+	conf := config.New(ctx, "")
+	c := &NetConfig{
+		Env:       conf.Require("env"),
+		ProjectID: conf.Require("project_id"),
+		Region1:   conf.Get("region1"),
+	}
+	if c.Region1 == "" {
+		c.Region1 = "us-central1"
+	}
+	return c
 }

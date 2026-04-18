@@ -1,50 +1,45 @@
-# 0-Bootstrap - Pulumi GCP Go Port
+# Stage 0: Bootstrap
 
-This directory contains the Pulumi Go implementation of the **0-bootstrap** stage from the [terraform-example-foundation](https://github.com/terraform-google-modules/terraform-example-foundation).
+This stage bootstraps your Google Cloud organization and prepares it for Infrastructure as Code management with Pulumi.
 
 ## Purpose
-The purpose of this stage is to bootstrap an existing Google Cloud organization. It creates the foundational resources required to manage your infrastructure as code using Pulumi.
+The Bootstrap stage is the "root" of your foundation. It creates the administrative resources that all subsequent stages rely on.
 
-Key resources created:
-- **Seed Project**: Houses the Pulumi state (if using a GCS backend) and the service accounts used by subsequent stages.
-- **Service Accounts**: Granular service accounts for `bootstrap`, `org`, `env`, `net`, `proj`, and `apps` stages, each with the least privilege required.
-- **Organization IAM**: Assigns the necessary roles at the organization level to the created service accounts.
-- **State Bucket**: A Google Cloud Storage bucket for storing Pulumi or Terraform state.
+### Key Resources
+- **Seed Project**: The administrative project that hosts the state storage and service accounts.
+- **Service Accounts**: Granular identities for each foundation stage (Org, Network, Projects, etc.).
+- **Permissions**: Minimum necessary IAM roles at the organization level for those service accounts.
+- **State Bucket**: A GCS bucket used by Pulumi to store infrastructure state securely.
 
-## Transition from Terraform to Pulumi
-This port translates the original CFT Bootstrap Terraform module into idiomatic Pulumi Go code.
-Key differences:
-- **Language**: HCL is replaced by Go, allowing for better testing and structured logic.
-- **Stack References**: Subsequent stages use Pulumi Stack References to retrieve outputs from this stage (e.g., Service Account emails, Project IDs).
-- **Automation**: Pulumi handles resource dependencies and ordering natively within the Go program.
+## Decisions: CI/CD Strategy
+In the original foundation, you chose between Cloud Build and Jenkins. With Pulumi, the recommended approach is to use **Pulumi Service** or a **GCS/S3 Backend** combined with **GitHub Actions** or **GitLab CI**.
 
-## Prerequisites
-- Pulumi CLI
-- Go 1.21+
-- Google Cloud SDK (`gcloud`)
-- Organization Admin and Billing Account Admin permissions.
+This reference architecture assumes you are using GitHub Actions.
 
-## Usage
-1. Initialize the stack:
-   ```bash
-   pulumi stack init bootstrap
-   ```
-2. Configure required variables:
-   ```bash
-   pulumi config set org_id 1234567890
-   pulumi config set billing_account 012345-678901-ABCDEF
-   pulumi config set project_prefix my-prefix
-   ```
-3. Deploy:
-   ```bash
-   pulumi up
-   ```
+## Onboarding / Usage
 
-## Configuration
-| Key | Description | Default |
-|-----|-------------|---------|
-| `org_id` | The GCP Organization ID | *Required* |
-| `billing_account` | The Billing Account ID | *Required* |
-| `project_prefix` | Prefix for project IDs | `prj` |
-| `folder_prefix` | Prefix for folder names | `fldr` |
-| `default_region` | Default region for resources | `us-central1` |
+1.  **Initialize the Stack**:
+    ```bash
+    pulumi stack init bootstrap
+    ```
+
+2.  **Set Configuration**:
+    Configure your organization and billing details:
+    ```bash
+    pulumi config set org_id <YOUR_ORG_ID>
+    pulumi config set billing_account <YOUR_BILLING_ACCOUNT_ID>
+    pulumi config set project_prefix vit-
+    ```
+
+3.  **Deployment**:
+    ```bash
+    pulumi up
+    ```
+
+4.  **Post-Deployment**:
+    Record the outputs. These will be automatically consumed by Stage 1 via Stack References.
+
+## File Structure
+- `main.go`: Orchestrates the bootstrap process.
+- `projects.go`: Uses the `project` component from the library to create the Seed project.
+- `iam.go`: Uses the `iam` component from the library to setup granular permissions.
