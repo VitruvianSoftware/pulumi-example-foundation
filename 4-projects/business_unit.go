@@ -18,51 +18,113 @@ package main
 
 import (
 	"fmt"
+
 	"github.com/VitruvianSoftware/pulumi-library/pkg/project"
+	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/compute"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )
 
+// BUProjects holds outputs from business unit project deployment.
 type BUProjects struct {
-	AppProjectID  pulumi.StringOutput
-	DataProjectID pulumi.StringOutput
+	SVPCProjectID     pulumi.StringOutput
+	FloatingProjectID pulumi.StringOutput
+	PeeringProjectID  pulumi.StringOutput
 }
 
-func deployBusinessUnitProjects(ctx *pulumi.Context, cfg *ProjectsConfig, folderID pulumi.StringOutput) (*BUProjects, error) {
-	if cfg.ProjectPrefix == "" {
-		cfg.ProjectPrefix = "prj"
+// deployBusinessUnitProjects creates three project types per BU/env, matching
+// the Terraform foundation's project factory pattern:
+//   - SVPC-attached: connected to the Shared VPC host project
+//   - Floating: standalone project, not attached to any VPC
+//   - Peering: project that would peer with the host VPC
+func deployBusinessUnitProjects(ctx *pulumi.Context, cfg *ProjectsConfig, folderID, networkProjectID pulumi.StringOutput) (*BUProjects, error) {
+	standardAPIs := []string{
+		"compute.googleapis.com",
+		"container.googleapis.com",
+		"run.googleapis.com",
+		"artifactregistry.googleapis.com",
+		"billingbudgets.googleapis.com",
+		"logging.googleapis.com",
 	}
 
-	// 1. App Project using Project Component
-	app, err := project.NewProject(ctx, "app-project", &project.ProjectArgs{
-		ProjectID:      pulumi.String(fmt.Sprintf("%s-%s-%s-app", cfg.ProjectPrefix, cfg.Env, cfg.BusinessCode)),
-		Name:           pulumi.String(fmt.Sprintf("%s-%s-%s-app", cfg.ProjectPrefix, cfg.Env, cfg.BusinessCode)),
+	// ========================================================================
+	// 1. SVPC-attached Project
+	// This project is attached as a service project to the environment's
+	// Shared VPC host, enabling shared network resource access.
+	// ========================================================================
+	svpcProject, err := project.NewProject(ctx, "bu-svpc-project", &project.ProjectArgs{
+		ProjectID:      pulumi.String(fmt.Sprintf("%s-%s-%s-sample-svpc", cfg.ProjectPrefix, cfg.EnvCode, cfg.BusinessCode)),
+		Name:           pulumi.String(fmt.Sprintf("%s-%s-%s-sample-svpc", cfg.ProjectPrefix, cfg.EnvCode, cfg.BusinessCode)),
 		FolderID:       folderID,
 		BillingAccount: pulumi.String(cfg.BillingAccount),
-		ActivateApis: pulumi.StringArray{
-			pulumi.String("run.googleapis.com"),
-			pulumi.String("artifactregistry.googleapis.com"),
-		},
+		ActivateApis:   standardAPIs,
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	// 2. Data Project using Project Component
-	data, err := project.NewProject(ctx, "data-project", &project.ProjectArgs{
-		ProjectID:      pulumi.String(fmt.Sprintf("%s-%s-%s-data", cfg.ProjectPrefix, cfg.Env, cfg.BusinessCode)),
-		Name:           pulumi.String(fmt.Sprintf("%s-%s-%s-data", cfg.ProjectPrefix, cfg.Env, cfg.BusinessCode)),
+	// Attach as a Shared VPC service project
+	if _, err := compute.NewSharedVPCServiceProject(ctx, "svpc-attachment", &compute.SharedVPCServiceProjectArgs{
+		HostProject:    networkProjectID,
+		ServiceProject: svpcProject.Project.ProjectId,
+	}); err != nil {
+		return nil, err
+	}
+
+	// ========================================================================
+	// 2. Floating Project (not attached to any VPC)
+	// ========================================================================
+	floatingProject, err := project.NewProject(ctx, "bu-floating-project", &project.ProjectArgs{
+		ProjectID:      pulumi.String(fmt.Sprintf("%s-%s-%s-sample-floating", cfg.ProjectPrefix, cfg.EnvCode, cfg.BusinessCode)),
+		Name:           pulumi.String(fmt.Sprintf("%s-%s-%s-sample-floating", cfg.ProjectPrefix, cfg.EnvCode, cfg.BusinessCode)),
 		FolderID:       folderID,
 		BillingAccount: pulumi.String(cfg.BillingAccount),
-		ActivateApis: pulumi.StringArray{
-			pulumi.String("bigquery.googleapis.com"),
-		},
+		ActivateApis:   standardAPIs,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// ========================================================================
+	// 3. Peering Project
+	// ========================================================================
+	peeringProject, err := project.NewProject(ctx, "bu-peering-project", &project.ProjectArgs{
+		ProjectID:      pulumi.String(fmt.Sprintf("%s-%s-%s-sample-peering", cfg.ProjectPrefix, cfg.EnvCode, cfg.BusinessCode)),
+		Name:           pulumi.String(fmt.Sprintf("%s-%s-%s-sample-peering", cfg.ProjectPrefix, cfg.EnvCode, cfg.BusinessCode)),
+		FolderID:       folderID,
+		BillingAccount: pulumi.String(cfg.BillingAccount),
+		ActivateApis:   standardAPIs,
 	})
 	if err != nil {
 		return nil, err
 	}
 
 	return &BUProjects{
-		AppProjectID:  app.Project.ProjectId,
-		DataProjectID: data.Project.ProjectId,
+		SVPCProjectID:     svpcProject.Project.ProjectId,
+		FloatingProjectID: floatingProject.Project.ProjectId,
+		PeeringProjectID:  peeringProject.Project.ProjectId,
 	}, nil
+}
+
+// deployInfraPipelineProject creates the infrastructure pipeline project under
+// the common folder. This project hosts the CI/CD pipeline for deploying
+// application infrastructure (Stage 5).
+func deployInfraPipelineProject(ctx *pulumi.Context, cfg *ProjectsConfig, commonFolderID pulumi.StringOutput) (pulumi.StringOutput, error) {
+	infraProject, err := project.NewProject(ctx, "infra-pipeline-project", &project.ProjectArgs{
+		ProjectID:      pulumi.String(fmt.Sprintf("%s-c-%s-infra-pipeline", cfg.ProjectPrefix, cfg.BusinessCode)),
+		Name:           pulumi.String(fmt.Sprintf("%s-c-%s-infra-pipeline", cfg.ProjectPrefix, cfg.BusinessCode)),
+		FolderID:       commonFolderID,
+		BillingAccount: pulumi.String(cfg.BillingAccount),
+		ActivateApis: []string{
+			"cloudbuild.googleapis.com",
+			"artifactregistry.googleapis.com",
+			"iam.googleapis.com",
+			"cloudresourcemanager.googleapis.com",
+			"billingbudgets.googleapis.com",
+		},
+	})
+	if err != nil {
+		return pulumi.StringOutput{}, err
+	}
+
+	return infraProject.Project.ProjectId, nil
 }
