@@ -37,7 +37,7 @@ func main() {
 			Name:                          pulumi.String(fmt.Sprintf("vpc-%s-hub", cfg.Env)),
 			AutoCreateSubnetworks:         pulumi.Bool(false),
 			RoutingMode:                   pulumi.String("GLOBAL"),
-			DeleteDefaultRoutesOnCreation: pulumi.Bool(true),
+			DeleteDefaultRoutesOnCreate: pulumi.Bool(true),
 		})
 		if err != nil {
 			return err
@@ -68,7 +68,7 @@ func main() {
 			Name:                          pulumi.String(fmt.Sprintf("vpc-%s-spoke", cfg.Env)),
 			AutoCreateSubnetworks:         pulumi.Bool(false),
 			RoutingMode:                   pulumi.String("GLOBAL"),
-			DeleteDefaultRoutesOnCreation: pulumi.Bool(true),
+			DeleteDefaultRoutesOnCreate: pulumi.Bool(true),
 		})
 		if err != nil {
 			return err

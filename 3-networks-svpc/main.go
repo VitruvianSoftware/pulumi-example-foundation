@@ -48,7 +48,7 @@ func main() {
 			Name:                          pulumi.String(fmt.Sprintf("vpc-%s-shared-base", cfg.Env)),
 			AutoCreateSubnetworks:         pulumi.Bool(false),
 			RoutingMode:                   pulumi.String("GLOBAL"),
-			DeleteDefaultRoutesOnCreation: pulumi.Bool(true),
+			DeleteDefaultRoutesOnCreate: pulumi.Bool(true),
 		})
 		if err != nil {
 			return err

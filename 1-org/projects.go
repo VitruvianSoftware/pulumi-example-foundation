@@ -55,6 +55,14 @@ func createProject(ctx *pulumi.Context, name, projectID string, folderID pulumi.
 // deployOrgProjects creates all organization-level projects under the Common
 // and Network folders. This mirrors the Terraform foundation's 1-org projects.tf.
 func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*OrgProjects, error) {
+	// Convert IDOutput to StringOutput for folder IDs
+	commonFolderID := folders.Common.ID().ApplyT(func(id pulumi.ID) string {
+		return string(id)
+	}).(pulumi.StringOutput)
+	networkFolderID := folders.Network.ID().ApplyT(func(id pulumi.ID) string {
+		return string(id)
+	}).(pulumi.StringOutput)
+
 	// ========================================================================
 	// Common Folder Projects
 	// ========================================================================
@@ -62,7 +70,7 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 	// Audit Logs — centralized logging destination
 	auditLogsProjectID, err := createProject(ctx, "org-logging",
 		fmt.Sprintf("%s-c-logging", cfg.ProjectPrefix),
-		folders.Common.ID(), cfg.BillingAccount, cfg.RandomSuffix,
+		commonFolderID, cfg.BillingAccount, cfg.RandomSuffix,
 		[]string{"logging.googleapis.com", "bigquery.googleapis.com", "billingbudgets.googleapis.com"},
 	)
 	if err != nil {
@@ -72,7 +80,7 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 	// Billing Export — BigQuery dataset for billing data
 	billingExportProjectID, err := createProject(ctx, "org-billing-export",
 		fmt.Sprintf("%s-c-billing-export", cfg.ProjectPrefix),
-		folders.Common.ID(), cfg.BillingAccount, cfg.RandomSuffix,
+		commonFolderID, cfg.BillingAccount, cfg.RandomSuffix,
 		[]string{"bigquery.googleapis.com", "billingbudgets.googleapis.com"},
 	)
 	if err != nil {
@@ -82,7 +90,7 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 	// Security Command Center — SCC notifications via Pub/Sub
 	sccProjectID, err := createProject(ctx, "org-scc",
 		fmt.Sprintf("%s-c-scc", cfg.ProjectPrefix),
-		folders.Common.ID(), cfg.BillingAccount, cfg.RandomSuffix,
+		commonFolderID, cfg.BillingAccount, cfg.RandomSuffix,
 		[]string{"securitycenter.googleapis.com", "pubsub.googleapis.com", "billingbudgets.googleapis.com"},
 	)
 	if err != nil {
@@ -92,7 +100,7 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 	// KMS — org-level key management
 	orgKMSProjectID, err := createProject(ctx, "org-kms",
 		fmt.Sprintf("%s-c-kms", cfg.ProjectPrefix),
-		folders.Common.ID(), cfg.BillingAccount, cfg.RandomSuffix,
+		commonFolderID, cfg.BillingAccount, cfg.RandomSuffix,
 		[]string{"cloudkms.googleapis.com", "billingbudgets.googleapis.com"},
 	)
 	if err != nil {
@@ -102,7 +110,7 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 	// Secrets — org-level secret storage
 	orgSecretsProjectID, err := createProject(ctx, "org-secrets",
 		fmt.Sprintf("%s-c-secrets", cfg.ProjectPrefix),
-		folders.Common.ID(), cfg.BillingAccount, cfg.RandomSuffix,
+		commonFolderID, cfg.BillingAccount, cfg.RandomSuffix,
 		[]string{"secretmanager.googleapis.com", "billingbudgets.googleapis.com"},
 	)
 	if err != nil {
@@ -116,7 +124,7 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 	// DNS Hub — centralized DNS management
 	dnsHubProjectID, err := createProject(ctx, "org-dns-hub",
 		fmt.Sprintf("%s-net-dns", cfg.ProjectPrefix),
-		folders.Network.ID(), cfg.BillingAccount, cfg.RandomSuffix,
+		networkFolderID, cfg.BillingAccount, cfg.RandomSuffix,
 		[]string{"dns.googleapis.com", "compute.googleapis.com", "servicenetworking.googleapis.com", "logging.googleapis.com", "billingbudgets.googleapis.com"},
 	)
 	if err != nil {
@@ -126,7 +134,7 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 	// Interconnect — Dedicated/Partner Interconnect connections
 	interconnectProjectID, err := createProject(ctx, "org-interconnect",
 		fmt.Sprintf("%s-net-interconnect", cfg.ProjectPrefix),
-		folders.Network.ID(), cfg.BillingAccount, cfg.RandomSuffix,
+		networkFolderID, cfg.BillingAccount, cfg.RandomSuffix,
 		[]string{"compute.googleapis.com", "billingbudgets.googleapis.com"},
 	)
 	if err != nil {
@@ -140,7 +148,7 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 		netProjectID, err := createProject(ctx,
 			fmt.Sprintf("org-net-%s", env),
 			fmt.Sprintf("%s-%s-svpc", cfg.ProjectPrefix, code),
-			folders.Network.ID(), cfg.BillingAccount, cfg.RandomSuffix,
+			networkFolderID, cfg.BillingAccount, cfg.RandomSuffix,
 			[]string{
 				"compute.googleapis.com",
 				"dns.googleapis.com",

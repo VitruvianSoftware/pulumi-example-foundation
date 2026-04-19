@@ -56,7 +56,10 @@ func main() {
 		}
 
 		// 4. Deploy Business Unit Projects
-		projects, err := deployBusinessUnitProjects(ctx, cfg, buFolder.ID(), networkProjectID)
+		buFolderID := buFolder.ID().ApplyT(func(id pulumi.ID) string {
+			return string(id)
+		}).(pulumi.StringOutput)
+		projects, err := deployBusinessUnitProjects(ctx, cfg, buFolderID, networkProjectID)
 		if err != nil {
 			return err
 		}

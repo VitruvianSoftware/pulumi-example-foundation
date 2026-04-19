@@ -36,14 +36,19 @@ func main() {
 			return err
 		}
 
+		// Convert IDOutput to StringOutput for folder ID
+		folderID := bootstrapFolder.ID().ApplyT(func(id pulumi.ID) string {
+			return string(id)
+		}).(pulumi.StringOutput)
+
 		// 3. Deploy the Seed Project (state storage and SA hosting)
-		seed, err := deploySeedProject(ctx, cfg, bootstrapFolder.ID())
+		seed, err := deploySeedProject(ctx, cfg, folderID)
 		if err != nil {
 			return err
 		}
 
 		// 4. Deploy the CI/CD Project (pipeline hosting)
-		cicd, err := deployCICDProject(ctx, cfg, bootstrapFolder.ID())
+		cicd, err := deployCICDProject(ctx, cfg, folderID)
 		if err != nil {
 			return err
 		}
