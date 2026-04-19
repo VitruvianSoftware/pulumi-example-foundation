@@ -132,10 +132,14 @@ func deploySeedProject(ctx *pulumi.Context, cfg *Config, folderID pulumi.StringO
 		return nil, err
 	}
 
+	kmsKeyID := cryptoKey.ID().ApplyT(func(id pulumi.ID) string {
+		return string(id)
+	}).(pulumi.StringOutput)
+
 	return &SeedProject{
 		ProjectID:       seed.Project.ProjectId,
 		StateBucketName: stateBucket.Name,
-		KMSKeyID:        cryptoKey.ID(),
+		KMSKeyID:        kmsKeyID,
 	}, nil
 }
 
