@@ -39,11 +39,12 @@ type OrgProjects struct {
 // shared Project component from the Vitruvian Pulumi Library.
 func createProject(ctx *pulumi.Context, name, projectID string, folderID pulumi.StringOutput, billingAccount string, apis []string) (pulumi.StringOutput, error) {
 	p, err := project.NewProject(ctx, name, &project.ProjectArgs{
-		ProjectID:      pulumi.String(projectID),
-		Name:           pulumi.String(projectID),
-		FolderID:       folderID,
-		BillingAccount: pulumi.String(billingAccount),
-		ActivateApis:   apis,
+		ProjectID:       pulumi.String(projectID),
+		Name:            pulumi.String(projectID),
+		FolderID:        folderID,
+		BillingAccount:  pulumi.String(billingAccount),
+		RandomProjectID: true,
+		ActivateApis:    apis,
 	})
 	if err != nil {
 		return pulumi.StringOutput{}, err

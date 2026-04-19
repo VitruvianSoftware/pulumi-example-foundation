@@ -22,6 +22,7 @@ import (
 	"github.com/VitruvianSoftware/pulumi-library/pkg/project"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/kms"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/storage"
+	"github.com/pulumi/pulumi-random/sdk/v4/go/random"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )
 
@@ -44,10 +45,11 @@ func deploySeedProject(ctx *pulumi.Context, cfg *Config, folderID pulumi.StringO
 	// The seed project activates all APIs required for foundation management.
 	// This full list matches the Terraform foundation's bootstrap module.
 	seed, err := project.NewProject(ctx, "seed-project", &project.ProjectArgs{
-		ProjectID:      pulumi.String(fmt.Sprintf("%s-b-seed", cfg.ProjectPrefix)),
-		Name:           pulumi.String(fmt.Sprintf("%s-b-seed", cfg.ProjectPrefix)),
-		FolderID:       folderID,
-		BillingAccount: pulumi.String(cfg.BillingAccount),
+		ProjectID:       pulumi.String(fmt.Sprintf("%s-b-seed", cfg.ProjectPrefix)),
+		Name:            pulumi.String(fmt.Sprintf("%s-b-seed", cfg.ProjectPrefix)),
+		FolderID:        folderID,
+		BillingAccount:  pulumi.String(cfg.BillingAccount),
+		RandomProjectID: true,
 		ActivateApis: []string{
 			"serviceusage.googleapis.com",
 			"servicenetworking.googleapis.com",
@@ -96,10 +98,21 @@ func deploySeedProject(ctx *pulumi.Context, cfg *Config, folderID pulumi.StringO
 		return nil, err
 	}
 
+	// Random suffix for the state bucket name, independent of the project ID
+	// suffix. This matches the upstream bootstrap module which uses a separate
+	// random_id resource (byte_length=2) for the GCS bucket name.
+	bucketSuffix, err := random.NewRandomId(ctx, "state-bucket-suffix", &random.RandomIdArgs{
+		ByteLength: pulumi.Int(2),
+	})
+	if err != nil {
+		return nil, err
+	}
+	stateBucketName := pulumi.Sprintf("%s-%s-b-seed-tfstate-%s", cfg.BucketPrefix, cfg.ProjectPrefix, bucketSuffix.Hex)
+
 	// State bucket with KMS encryption, versioning, and uniform bucket-level access.
 	stateBucket, err := storage.NewBucket(ctx, "tf-state-bucket", &storage.BucketArgs{
 		Project:                  seed.Project.ProjectId,
-		Name:                     pulumi.String(fmt.Sprintf("%s-%s-b-seed-tfstate", cfg.BucketPrefix, cfg.ProjectPrefix)),
+		Name:                     stateBucketName,
 		Location:                 pulumi.String(cfg.DefaultRegionGCS),
 		UniformBucketLevelAccess: pulumi.Bool(true),
 		ForceDestroy:             pulumi.Bool(cfg.BucketForceDestroy),
@@ -126,10 +139,11 @@ func deploySeedProject(ctx *pulumi.Context, cfg *Config, folderID pulumi.StringO
 // This is the equivalent of prj-b-cicd in the Terraform foundation.
 func deployCICDProject(ctx *pulumi.Context, cfg *Config, folderID pulumi.StringOutput) (*CICDProject, error) {
 	cicd, err := project.NewProject(ctx, "cicd-project", &project.ProjectArgs{
-		ProjectID:      pulumi.String(fmt.Sprintf("%s-b-cicd", cfg.ProjectPrefix)),
-		Name:           pulumi.String(fmt.Sprintf("%s-b-cicd", cfg.ProjectPrefix)),
-		FolderID:       folderID,
-		BillingAccount: pulumi.String(cfg.BillingAccount),
+		ProjectID:       pulumi.String(fmt.Sprintf("%s-b-cicd", cfg.ProjectPrefix)),
+		Name:            pulumi.String(fmt.Sprintf("%s-b-cicd", cfg.ProjectPrefix)),
+		FolderID:        folderID,
+		BillingAccount:  pulumi.String(cfg.BillingAccount),
+		RandomProjectID: true,
 		ActivateApis: []string{
 			"serviceusage.googleapis.com",
 			"servicenetworking.googleapis.com",

@@ -101,10 +101,13 @@ included.
 [Security Foundations Guide](https://cloud.google.com/architecture/security-foundations/using-example-terraform#naming_conventions),
 including random suffixes on project IDs to avoid collisions.
 
-**This port:** Follows the same prefix conventions (`prj-`, `fldr-`, `bkt-`)
-but does **not** append random suffixes to project IDs. Project IDs are
-deterministic (e.g., `prj-b-seed`), which means they may collide if the
-foundation is deployed multiple times in the same organization.
+**This port:** ~~Does not append random suffixes.~~ **Resolved.** All project
+IDs now receive a 4-character random hex suffix (e.g., `prj-b-seed-a1b2`) via
+the `RandomProjectID` option on the shared `project.NewProject` component, and
+the state bucket name receives an independent suffix. This matches the upstream
+`terraform-google-project-factory` module's `random_project_id` feature. The
+suffix is generated once by a `random.RandomId` resource and persisted in
+Pulumi state.
 
 ## Essential Contacts and Tags
 
