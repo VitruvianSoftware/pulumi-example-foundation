@@ -137,6 +137,30 @@ All stages use the [Vitruvian Software Pulumi Library](https://github.com/Vitruv
 - `pkg/app` — Cloud Run deployment
 - `pkg/data` — BigQuery data platform
 
+## Intended Usage and Support
+
+This repository is intended as an example to be forked, tweaked, and maintained in the user's own version-control system; the modules within this repository are not intended for use as remote references.
+Though this blueprint can help accelerate your foundation design and build, we assume that you have the engineering skills and teams to deploy and customize your own foundation based on your own requirements.
+
+## Optional Variables
+
+Some configuration values used to deploy the stages have defaults. Check those **before deployment** to ensure they match your requirements. For more information, see the configuration reference tables in each stage's README:
+
+- Step 0-bootstrap: [Configuration Reference](./0-bootstrap/README.md#configuration-reference)
+- Step 1-org: [Configuration Reference](./1-org/README.md#configuration-reference)
+- Step 2-environments: [Configuration Reference](./2-environments/README.md#configuration-reference)
+- Step 3-networks-svpc: [Configuration Reference](./3-networks-svpc/README.md#configuration-reference)
+- Step 3-networks-hub-and-spoke: [Configuration Reference](./3-networks-hub-and-spoke/README.md#configuration-reference)
+- Step 4-projects: [Configuration Reference](./4-projects/README.md#configuration-reference)
+- Step 5-app-infra: [Configuration Reference](./5-app-infra/README.md#configuration-reference)
+
+## Documentation
+
+- [Troubleshooting Guide](./docs/TROUBLESHOOTING.md) — Solutions for common deployment issues
+- [Glossary](./docs/GLOSSARY.md) — Definitions of key terms used throughout the documentation
+- [FAQ](./docs/FAQ.md) — Frequently asked questions about the foundation
+- [Onboarding Guide](./ONBOARDING.md) — Step-by-step quickstart for deploying your foundation
+
 ## Public vs. Private
 - This repo is a **Public Reference**.
 - Real Vitruvian Software implementations are managed in **Private** `gcp-*` repositories that consume this foundation logic.
