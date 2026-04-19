@@ -148,6 +148,13 @@ func main() {
 	})
 }
 
+// RetentionPolicy configures data retention on the log export storage bucket.
+// When IsLocked is true, the retention policy cannot be shortened or removed.
+type RetentionPolicy struct {
+	IsLocked            bool
+	RetentionPeriodDays int
+}
+
 // OrgConfig holds all configuration for the organization stage.
 // This mirrors all variables from the Terraform foundation's 1-org/envs/shared/variables.tf.
 type OrgConfig struct {
@@ -196,6 +203,21 @@ type OrgConfig struct {
 	RandomSuffix             bool
 	ProjectDeletionPolicy    string
 	FolderDeletionProtection bool
+
+	// Logging — storage options (H6, H7, H8)
+	LogExportStorageLocation       string
+	LogExportStorageForceDestroy   bool
+	LogExportStorageVersioning     bool
+	LogExportStorageRetentionPolicy *RetentionPolicy
+
+	// Logging — billing export
+	BillingExportDatasetLocation string
+
+	// Essential Contacts (H9)
+	EssentialContactsLanguage string
+
+	// Tags (H14)
+	CreateUniqueTagKey bool
 }
 
 func loadOrgConfig(ctx *pulumi.Context) *OrgConfig {
@@ -234,6 +256,20 @@ func loadOrgConfig(ctx *pulumi.Context) *OrgConfig {
 		ProjectDeletionPolicy:    conf.Get("project_deletion_policy"),
 		FolderDeletionProtection: conf.Get("folder_deletion_protection") != "false",
 
+		// Logging storage options (H6, H7)
+		LogExportStorageLocation:     conf.Get("log_export_storage_location"),
+		LogExportStorageForceDestroy: conf.Get("log_export_storage_force_destroy") == "true",
+		LogExportStorageVersioning:   conf.Get("log_export_storage_versioning") != "false",
+
+		// Logging billing export
+		BillingExportDatasetLocation: conf.Get("billing_export_dataset_location"),
+
+		// Essential Contacts (H9)
+		EssentialContactsLanguage: conf.Get("essential_contacts_language"),
+
+		// Tags
+		CreateUniqueTagKey: conf.Get("create_unique_tag_key") == "true",
+
 		// Bootstrap
 		BootstrapFolderName: conf.Get("bootstrap_folder_name"),
 	}
@@ -268,6 +304,25 @@ func loadOrgConfig(ctx *pulumi.Context) *OrgConfig {
 	}
 	if c.ProjectDeletionPolicy == "" {
 		c.ProjectDeletionPolicy = "PREVENT"
+	}
+	if c.EssentialContactsLanguage == "" {
+		c.EssentialContactsLanguage = "en"
+	}
+
+	// Log storage retention policy (H8)
+	if retentionDays := conf.GetInt("log_export_storage_retention_days"); retentionDays > 0 {
+		c.LogExportStorageRetentionPolicy = &RetentionPolicy{
+			IsLocked:            conf.Get("log_export_storage_retention_locked") == "true",
+			RetentionPeriodDays: retentionDays,
+		}
+	}
+
+	// Storage location defaults to DefaultRegion when not set
+	if c.LogExportStorageLocation == "" {
+		c.LogExportStorageLocation = c.DefaultRegion
+	}
+	if c.BillingExportDatasetLocation == "" {
+		c.BillingExportDatasetLocation = c.DefaultRegion
 	}
 
 	parentFolder := conf.Get("parent_folder")

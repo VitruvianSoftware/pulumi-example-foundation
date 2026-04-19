@@ -80,11 +80,13 @@ logName: /logs/dns.googleapis.com%2Fdns_queries`
 		Name: auditProjectID.ApplyT(func(id string) string {
 			return fmt.Sprintf("bkt-%s-org-logs", id)
 		}).(pulumi.StringOutput),
-		Location:                 pulumi.String(cfg.DefaultRegion),
+		Location:                 pulumi.String(cfg.LogExportStorageLocation),
 		UniformBucketLevelAccess: pulumi.Bool(true),
+		ForceDestroy:             pulumi.Bool(cfg.LogExportStorageForceDestroy),
 		Versioning: &storage.BucketVersioningArgs{
-			Enabled: pulumi.Bool(true),
+			Enabled: pulumi.Bool(cfg.LogExportStorageVersioning),
 		},
+		RetentionPolicy: logStorageRetentionPolicy(cfg),
 	})
 	if err != nil {
 		return nil, err
@@ -163,7 +165,7 @@ logName: /logs/dns.googleapis.com%2Fdns_queries`
 		Project:      billingExportProjectID,
 		DatasetId:    pulumi.String("billing_data"),
 		FriendlyName: pulumi.String("GCP Billing Data"),
-		Location:     pulumi.String(cfg.DefaultRegion),
+		Location:     pulumi.String(cfg.BillingExportDatasetLocation),
 	}); err != nil {
 		return nil, err
 	}
@@ -172,4 +174,17 @@ logName: /logs/dns.googleapis.com%2Fdns_queries`
 		StorageBucketName: logBucket.Name,
 		PubSubTopicName:   logTopic.Name,
 	}, nil
+}
+
+// logStorageRetentionPolicy builds the retention policy args from config.
+// Returns nil when no retention policy is configured (default).
+func logStorageRetentionPolicy(cfg *OrgConfig) *storage.BucketRetentionPolicyArgs {
+	if cfg.LogExportStorageRetentionPolicy == nil {
+		return nil
+	}
+	retentionSeconds := cfg.LogExportStorageRetentionPolicy.RetentionPeriodDays * 86400
+	return &storage.BucketRetentionPolicyArgs{
+		IsLocked:        pulumi.Bool(cfg.LogExportStorageRetentionPolicy.IsLocked),
+		RetentionPeriod: pulumi.String(fmt.Sprintf("%d", retentionSeconds)),
+	}
 }

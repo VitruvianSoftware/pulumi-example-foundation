@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/tags"
+	"github.com/pulumi/pulumi-random/sdk/v4/go/random"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )
 
@@ -28,16 +29,35 @@ import (
 // Tags enable fine-grained IAM conditions and resource organization across
 // the foundation hierarchy.
 // This mirrors the Terraform foundation's tags.tf.
+//
+// When CreateUniqueTagKey is true (recommended for parent folder deployments),
+// a random suffix is appended to tag key names to avoid org-wide conflicts.
 func deployTags(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (pulumi.MapOutput, error) {
 	parent := "organizations/" + cfg.OrgID
 	if cfg.ParentFolder != "" {
 		parent = "folders/" + cfg.ParentFolder
 	}
 
+	// Optional random suffix for unique tag keys (H14 / create_unique_tag_key)
+	var keySuffix pulumi.StringInput = pulumi.String("environment")
+	if cfg.CreateUniqueTagKey {
+		suffix, err := random.NewRandomString(ctx, "tag-key-suffix", &random.RandomStringArgs{
+			Length:  pulumi.Int(8),
+			Special: pulumi.Bool(false),
+			Upper:   pulumi.Bool(false),
+		})
+		if err != nil {
+			return pulumi.MapOutput{}, err
+		}
+		keySuffix = suffix.Result.ApplyT(func(s string) string {
+			return fmt.Sprintf("environment-%s", s)
+		}).(pulumi.StringOutput)
+	}
+
 	// Environment tag key
 	envTagKey, err := tags.NewTagKey(ctx, "environment-tag", &tags.TagKeyArgs{
 		Parent:      pulumi.String(parent),
-		ShortName:   pulumi.String("environment"),
+		ShortName:   keySuffix,
 		Description: pulumi.String("Environment classification for foundation resources"),
 	})
 	if err != nil {
