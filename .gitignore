@@ -16,3 +16,4 @@ vendor/
 .DS_Store
 .env
 1-org/foundation-1-org
+0-bootstrap/foundation-0-bootstrap

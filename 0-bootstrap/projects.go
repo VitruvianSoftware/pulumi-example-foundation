@@ -19,10 +19,8 @@ package main
 import (
 	"fmt"
 
+	"github.com/VitruvianSoftware/pulumi-library/pkg/bootstrap"
 	"github.com/VitruvianSoftware/pulumi-library/pkg/project"
-	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/kms"
-	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/storage"
-	"github.com/pulumi/pulumi-random/sdk/v4/go/random"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )
 
@@ -39,21 +37,29 @@ type CICDProject struct {
 }
 
 // deploySeedProject creates the seed project that hosts Terraform/Pulumi state
-// and the service accounts used by the foundation pipeline. This is the
-// equivalent of prj-b-seed in the Terraform foundation.
-func deploySeedProject(ctx *pulumi.Context, cfg *Config, folderID pulumi.StringOutput) (*SeedProject, error) {
-	// The seed project activates all APIs required for foundation management.
-	// This full list matches the Terraform foundation's bootstrap module.
-	seed, err := project.NewProject(ctx, "seed-project", &project.ProjectArgs{
-		ProjectID:       pulumi.String(fmt.Sprintf("%s-b-seed", cfg.ProjectPrefix)),
-		Name:            pulumi.String(fmt.Sprintf("%s-b-seed", cfg.ProjectPrefix)),
-		FolderID:        folderID,
-		BillingAccount:  pulumi.String(cfg.BillingAccount),
-		RandomProjectID: cfg.RandomSuffix,
-		DeletionPolicy:  pulumi.String("PREVENT"),
-		Labels: pulumi.StringMap{
+// and the service accounts used by the foundation pipeline. This uses the
+// Bootstrap component from the Vitruvian Pulumi Library, which mirrors the
+// upstream terraform-google-modules/terraform-google-bootstrap module.
+//
+// The Bootstrap component handles:
+//   - Seed project creation (with lien + default SA management)
+//   - KMS key ring and crypto key for state encryption
+//   - GCS state bucket with KMS encryption and versioning
+//   - Org policy for cross-project SA usage
+//   - State bucket IAM grants
+func deploySeedProject(ctx *pulumi.Context, cfg *Config, folderID pulumi.StringOutput, bucketIAMMembers []pulumi.StringInput) (*SeedProject, error) {
+	b, err := bootstrap.NewBootstrap(ctx, "seed-bootstrap", &bootstrap.BootstrapArgs{
+		OrgID:          cfg.OrgID,
+		FolderID:       folderID,
+		BillingAccount: cfg.BillingAccount,
+		ProjectPrefix:  cfg.ProjectPrefix,
+		DefaultRegion:  cfg.DefaultRegionKMS,
+		RandomSuffix:   cfg.RandomSuffix,
+		ProjectLabels: pulumi.StringMap{
 			"environment":      pulumi.String("bootstrap"),
 			"application_name": pulumi.String("seed-bootstrap"),
+			"billing_code":     pulumi.String("1234"),
+			"primary_contact":  pulumi.String("example1"),
 			"business_code":    pulumi.String("shared"),
 			"env_code":         pulumi.String("b"),
 			"vpc":              pulumi.String("none"),
@@ -81,91 +87,42 @@ func deploySeedProject(ctx *pulumi.Context, cfg *Config, folderID pulumi.StringO
 			"assuredworkloads.googleapis.com",
 			"cloudasset.googleapis.com",
 		},
+
+		// State Bucket
+		BucketPrefix:       cfg.BucketPrefix,
+		BucketForceDestroy: cfg.BucketForceDestroy,
+
+		// KMS — matches TF foundation defaults
+		KeyProtectionLevel: cfg.KMSKeyProtectionLevel,
+
+		// State bucket IAM — grant access to all pipeline SAs and org admins
+		StateBucketIAMMembers: bucketIAMMembers,
 	}, pulumi.Protect(true))
 	if err != nil {
 		return nil, err
 	}
-
-	// KMS Key Ring and Crypto Key for state bucket encryption.
-	// Rotation period is 90 days, matching GCP security best practices.
-	keyRing, err := kms.NewKeyRing(ctx, "state-bucket-keyring", &kms.KeyRingArgs{
-		Project:  seed.Project.ProjectId,
-		Name:     pulumi.String(fmt.Sprintf("%s-keyring", cfg.ProjectPrefix)),
-		Location: pulumi.String(cfg.DefaultRegionKMS),
-	}, pulumi.Protect(true))
-	if err != nil {
-		return nil, err
-	}
-
-	cryptoKey, err := kms.NewCryptoKey(ctx, "state-bucket-key", &kms.CryptoKeyArgs{
-		Name:           pulumi.String(fmt.Sprintf("%s-key", cfg.ProjectPrefix)),
-		KeyRing:        keyRing.ID(),
-		RotationPeriod: pulumi.String("7776000s"), // 90 days
-		VersionTemplate: &kms.CryptoKeyVersionTemplateArgs{
-			ProtectionLevel: pulumi.String(cfg.KMSKeyProtectionLevel),
-			Algorithm:       pulumi.String("GOOGLE_SYMMETRIC_ENCRYPTION"),
-		},
-	}, pulumi.Protect(true))
-	if err != nil {
-		return nil, err
-	}
-
-	// When RandomSuffix is enabled, append a random hex suffix to the bucket
-	// name. This matches the upstream bootstrap module which uses a separate
-	// random_id resource (byte_length=2) for the GCS bucket name.
-	var stateBucketName pulumi.StringInput
-	if cfg.RandomSuffix {
-		bucketSuffix, err := random.NewRandomId(ctx, "state-bucket-suffix", &random.RandomIdArgs{
-			ByteLength: pulumi.Int(2),
-		})
-		if err != nil {
-			return nil, err
-		}
-		stateBucketName = pulumi.Sprintf("%s-%s-b-seed-tfstate-%s", cfg.BucketPrefix, cfg.ProjectPrefix, bucketSuffix.Hex)
-	} else {
-		stateBucketName = pulumi.String(fmt.Sprintf("%s-%s-b-seed-tfstate", cfg.BucketPrefix, cfg.ProjectPrefix))
-	}
-
-	// State bucket with KMS encryption, versioning, and uniform bucket-level access.
-	stateBucket, err := storage.NewBucket(ctx, "tf-state-bucket", &storage.BucketArgs{
-		Project:                  seed.Project.ProjectId,
-		Name:                     stateBucketName,
-		Location:                 pulumi.String(cfg.DefaultRegionGCS),
-		UniformBucketLevelAccess: pulumi.Bool(true),
-		ForceDestroy:             pulumi.Bool(cfg.BucketForceDestroy),
-		Versioning: &storage.BucketVersioningArgs{
-			Enabled: pulumi.Bool(true),
-		},
-		Encryption: &storage.BucketEncryptionArgs{
-			DefaultKmsKeyName: cryptoKey.ID(),
-		},
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	kmsKeyID := cryptoKey.ID().ApplyT(func(id pulumi.ID) string {
-		return string(id)
-	}).(pulumi.StringOutput)
 
 	return &SeedProject{
-		ProjectID:       seed.Project.ProjectId,
-		StateBucketName: stateBucket.Name,
-		KMSKeyID:        kmsKeyID,
+		ProjectID:       b.SeedProjectID,
+		StateBucketName: b.StateBucketName,
+		KMSKeyID:        b.KMSKeyID,
 	}, nil
 }
 
 // deployCICDProject creates the CI/CD project that hosts the pipeline
 // infrastructure (Artifact Registry, Cloud Build, Workload Identity, etc.).
 // This is the equivalent of prj-b-cicd in the Terraform foundation.
+// The CI/CD project uses pkg/project directly (not pkg/bootstrap) because
+// it doesn't need state bucket or KMS — those live in the seed project.
 func deployCICDProject(ctx *pulumi.Context, cfg *Config, folderID pulumi.StringOutput) (*CICDProject, error) {
 	cicd, err := project.NewProject(ctx, "cicd-project", &project.ProjectArgs{
-		ProjectID:       pulumi.String(fmt.Sprintf("%s-b-cicd", cfg.ProjectPrefix)),
-		Name:            pulumi.String(fmt.Sprintf("%s-b-cicd", cfg.ProjectPrefix)),
-		FolderID:        folderID,
-		BillingAccount:  pulumi.String(cfg.BillingAccount),
-		RandomProjectID: cfg.RandomSuffix,
-		DeletionPolicy:  pulumi.String("PREVENT"),
+		ProjectID:             pulumi.String(fmt.Sprintf("%s-b-cicd", cfg.ProjectPrefix)),
+		Name:                  pulumi.String(fmt.Sprintf("%s-b-cicd", cfg.ProjectPrefix)),
+		FolderID:              folderID,
+		BillingAccount:        pulumi.String(cfg.BillingAccount),
+		RandomProjectID:       cfg.RandomSuffix,
+		DeletionPolicy:        pulumi.String("PREVENT"),
+		DefaultServiceAccount: "disable",
 		Labels: pulumi.StringMap{
 			"environment":      pulumi.String("bootstrap"),
 			"application_name": pulumi.String("seed-cicd"),

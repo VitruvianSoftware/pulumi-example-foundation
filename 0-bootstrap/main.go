@@ -43,7 +43,8 @@ func main() {
 		}).(pulumi.StringOutput)
 
 		// 3. Deploy the Seed Project (state storage and SA hosting)
-		seed, err := deploySeedProject(ctx, cfg, folderID)
+		// Bucket IAM members are added later in deployIAM once SAs exist.
+		seed, err := deploySeedProject(ctx, cfg, folderID, nil)
 		if err != nil {
 			return err
 		}
