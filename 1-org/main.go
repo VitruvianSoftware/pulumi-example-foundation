@@ -155,6 +155,29 @@ type RetentionPolicy struct {
 	RetentionPeriodDays int
 }
 
+// ProjectBudgetConfig mirrors the TF foundation's project_budget variable (H2).
+// Each field controls budget amounts and alerting per project.
+// Amount defaults to 1000, AlertSpentPercents defaults to [1.2].
+type ProjectBudgetConfig struct {
+	// Per-project budget amounts (in billing account currency, e.g. USD)
+	OrgLoggingBudgetAmount     float64
+	OrgBillingExportAmount     float64
+	OrgSCCBudgetAmount         float64
+	OrgKMSBudgetAmount         float64
+	OrgSecretsBudgetAmount     float64
+	OrgDNSHubBudgetAmount      float64
+	OrgInterconnectBudgetAmount float64
+	OrgNetHubBudgetAmount      float64
+
+	// Shared alert thresholds (defaults: [1.2])
+	AlertSpentPercents []float64
+
+	// Optional per-project Pub/Sub topics for budget notifications
+	OrgLoggingAlertPubSubTopic     string
+	OrgSCCAlertPubSubTopic         string
+	OrgNetHubAlertPubSubTopic      string
+}
+
 // OrgConfig holds all configuration for the organization stage.
 // This mirrors all variables from the Terraform foundation's 1-org/envs/shared/variables.tf.
 type OrgConfig struct {
@@ -203,6 +226,10 @@ type OrgConfig struct {
 	RandomSuffix             bool
 	ProjectDeletionPolicy    string
 	FolderDeletionProtection bool
+	DefaultServiceAccount    string
+
+	// Project Budgets (H2)
+	ProjectBudget *ProjectBudgetConfig
 
 	// Logging — storage options (H6, H7, H8)
 	LogExportStorageLocation       string
@@ -255,6 +282,7 @@ func loadOrgConfig(ctx *pulumi.Context) *OrgConfig {
 		// Projects
 		ProjectDeletionPolicy:    conf.Get("project_deletion_policy"),
 		FolderDeletionProtection: conf.Get("folder_deletion_protection") != "false",
+		DefaultServiceAccount:    conf.Get("default_service_account"),
 
 		// Logging storage options (H6, H7)
 		LogExportStorageLocation:     conf.Get("log_export_storage_location"),
