@@ -38,6 +38,11 @@ jobs:
   build:
     name: "Build: ${{ matrix.stage }}"
     runs-on: ubuntu-latest
+    env:
+      # Disable go.work so each stage uses its own go.mod with the
+      # CI-rewritten replace directive instead of the repo's go.work
+      # which references a local path that doesn't exist in CI.
+      GOWORK: "off"
     strategy:
       fail-fast: false
       matrix:
