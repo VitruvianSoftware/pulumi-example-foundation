@@ -90,6 +90,11 @@ jobs:
         working-directory: ${{ matrix.stage }}
         run: go build ./...
 
+      - name: Test
+        working-directory: ${{ matrix.stage }}
+        run: go test ./... -race -count=1
+
+
   commitlint:
     name: Commit Lint
     runs-on: ubuntu-latest
