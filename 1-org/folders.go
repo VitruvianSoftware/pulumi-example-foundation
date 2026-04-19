@@ -29,20 +29,28 @@ type Folders struct {
 }
 
 func deployFolders(ctx *pulumi.Context, cfg *OrgConfig) (*Folders, error) {
+	// Folder resource options — apply deletion protection when enabled (D11)
+	var folderOpts []pulumi.ResourceOption
+	if cfg.FolderDeletionProtection {
+		folderOpts = append(folderOpts, pulumi.Protect(true))
+	}
+
 	// Common Folder
 	common, err := organizations.NewFolder(ctx, "common-folder", &organizations.FolderArgs{
-		DisplayName: pulumi.String(fmt.Sprintf("%s-common", cfg.FolderPrefix)),
-		Parent:      pulumi.String(cfg.Parent),
-	})
+		DisplayName:        pulumi.String(fmt.Sprintf("%s-common", cfg.FolderPrefix)),
+		Parent:             pulumi.String(cfg.Parent),
+		DeletionProtection: pulumi.Bool(cfg.FolderDeletionProtection),
+	}, folderOpts...)
 	if err != nil {
 		return nil, err
 	}
 
 	// Network Folder
 	network, err := organizations.NewFolder(ctx, "network-folder", &organizations.FolderArgs{
-		DisplayName: pulumi.String(fmt.Sprintf("%s-network", cfg.FolderPrefix)),
-		Parent:      pulumi.String(cfg.Parent),
-	})
+		DisplayName:        pulumi.String(fmt.Sprintf("%s-network", cfg.FolderPrefix)),
+		Parent:             pulumi.String(cfg.Parent),
+		DeletionProtection: pulumi.Bool(cfg.FolderDeletionProtection),
+	}, folderOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -52,9 +60,10 @@ func deployFolders(ctx *pulumi.Context, cfg *OrgConfig) (*Folders, error) {
 	envFolders := make(map[string]*organizations.Folder)
 	for _, env := range envs {
 		f, err := organizations.NewFolder(ctx, fmt.Sprintf("folder-%s", env), &organizations.FolderArgs{
-			DisplayName: pulumi.String(fmt.Sprintf("%s-%s", cfg.FolderPrefix, env)),
-			Parent:      pulumi.String(cfg.Parent),
-		})
+			DisplayName:        pulumi.String(fmt.Sprintf("%s-%s", cfg.FolderPrefix, env)),
+			Parent:             pulumi.String(cfg.Parent),
+			DeletionProtection: pulumi.Bool(cfg.FolderDeletionProtection),
+		}, folderOpts...)
 		if err != nil {
 			return nil, err
 		}
@@ -67,3 +76,4 @@ func deployFolders(ctx *pulumi.Context, cfg *OrgConfig) (*Folders, error) {
 		Environments: envFolders,
 	}, nil
 }
+

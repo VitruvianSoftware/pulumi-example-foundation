@@ -48,7 +48,7 @@ func deploySCCNotification(ctx *pulumi.Context, cfg *OrgConfig, sccProjectID pul
 	// 3. SCC V2 Notification Config — streams findings to Pub/Sub
 	if _, err := securitycenter.NewV2OrganizationNotificationConfig(ctx, "scc-notification", &securitycenter.V2OrganizationNotificationConfigArgs{
 		Organization: pulumi.String(cfg.OrgID),
-		ConfigId:     pulumi.String("scc-notify-all"),
+		ConfigId:     pulumi.String(cfg.SCCNotificationName),
 		Description:  pulumi.String("SCC Notification for all active findings"),
 		PubsubTopic:  sccTopic.ID(),
 		StreamingConfig: &securitycenter.V2OrganizationNotificationConfigStreamingConfigArgs{

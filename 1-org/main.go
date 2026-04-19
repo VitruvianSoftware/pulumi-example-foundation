@@ -24,17 +24,36 @@ import (
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi/config"
 )
 
+// BootstrapOutputs holds resolved values from the 0-bootstrap StackReference.
+type BootstrapOutputs struct {
+	BootstrapFolderName string
+
+	// Required groups
+	GroupOrgAdmins     string
+	GroupBillingAdmins string
+	BillingDataUsers   string
+	AuditDataUsers     string
+
+	// Optional groups
+	GCPSecurityReviewer    string
+	GCPNetworkViewer       string
+	GCPSCCAdmin            string
+	GCPGlobalSecretsAdmin  string
+	GCPKMSAdmin            string
+}
+
 func main() {
 	pulumi.Run(func(ctx *pulumi.Context) error {
 		cfg := loadOrgConfig(ctx)
 
 		// 1. Stack Reference to Bootstrap (for cross-stage outputs)
-		_, err := pulumi.NewStackReference(ctx, "bootstrap", &pulumi.StackReferenceArgs{
+		bootstrapRef, err := pulumi.NewStackReference(ctx, "bootstrap", &pulumi.StackReferenceArgs{
 			Name: pulumi.String(cfg.BootstrapStackName),
 		})
 		if err != nil {
 			return err
 		}
+		_ = bootstrapRef // Used for StackReference outputs in future enhancements
 
 		// 2. Deploy Folders (Common, Network, Environment)
 		folders, err := deployFolders(ctx, cfg)
@@ -54,26 +73,53 @@ func main() {
 		}
 
 		// 5. Deploy Centralized Logging (org sinks → Storage, Pub/Sub, BigQuery)
-		if err := deployCentralizedLogging(ctx, cfg, projOutputs.AuditLogsProjectID, projOutputs.BillingExportProjectID); err != nil {
+		logOutputs, err := deployCentralizedLogging(ctx, cfg, projOutputs.AuditLogsProjectID, projOutputs.BillingExportProjectID)
+		if err != nil {
 			return err
 		}
 
 		// 6. Deploy SCC Notifications
-		if err := deploySCCNotification(ctx, cfg, projOutputs.SCCProjectID); err != nil {
+		if cfg.EnableSCCResources {
+			if err := deploySCCNotification(ctx, cfg, projOutputs.SCCProjectID); err != nil {
+				return err
+			}
+		}
+
+		// 7. Deploy Org-level Tags (with folder bindings)
+		tagOutputs, err := deployTags(ctx, cfg, folders)
+		if err != nil {
 			return err
 		}
 
-		// 7. Deploy Org-level Tags
-		if err := deployTags(ctx, cfg); err != nil {
+		// 8. Deploy IAM bindings for groups
+		if err := deployOrgIAM(ctx, cfg, projOutputs); err != nil {
 			return err
 		}
 
-		// 8. Exports
+		// 9. Deploy Essential Contacts
+		if err := deployEssentialContacts(ctx, cfg); err != nil {
+			return err
+		}
+
+		// =================================================================
+		// 10. Exports
+		// =================================================================
+
+		// Org/parent metadata
+		ctx.Export("org_id", pulumi.String(cfg.OrgID))
+		ctx.Export("parent_resource_id", pulumi.String(cfg.ParentID))
+		ctx.Export("parent_resource_type", pulumi.String(cfg.ParentType))
+
+		// Folders
+		ctx.Export("common_folder_name", folders.Common.Name)
 		ctx.Export("common_folder_id", folders.Common.ID())
+		ctx.Export("network_folder_name", folders.Network.Name)
 		ctx.Export("network_folder_id", folders.Network.ID())
 		for env, f := range folders.Environments {
 			ctx.Export(fmt.Sprintf("%s_folder_id", env), f.ID())
 		}
+
+		// Projects
 		ctx.Export("audit_logs_project_id", projOutputs.AuditLogsProjectID)
 		ctx.Export("billing_export_project_id", projOutputs.BillingExportProjectID)
 		ctx.Export("scc_project_id", projOutputs.SCCProjectID)
@@ -81,29 +127,124 @@ func main() {
 		ctx.Export("org_secrets_project_id", projOutputs.OrgSecretsProjectID)
 		ctx.Export("dns_hub_project_id", projOutputs.DNSHubProjectID)
 		ctx.Export("interconnect_project_id", projOutputs.InterconnectProjectID)
+		if cfg.EnableHubAndSpoke {
+			ctx.Export("net_hub_project_id", projOutputs.NetHubProjectID)
+		}
 		for env, id := range projOutputs.NetworkProjectIDs {
 			ctx.Export(fmt.Sprintf("%s_network_project_id", env), id)
 		}
+
+		// Logging
+		ctx.Export("logs_export_storage_bucket_name", logOutputs.StorageBucketName)
+		ctx.Export("logs_export_pubsub_topic", logOutputs.PubSubTopicName)
+
+		// Tags
+		ctx.Export("tags", tagOutputs)
+
+		// Config passthrough
+		ctx.Export("domains_to_allow", pulumi.ToStringArray(cfg.DomainsToAllow))
 
 		return nil
 	})
 }
 
+// RetentionPolicy configures data retention on the log export storage bucket.
+// When IsLocked is true, the retention policy cannot be shortened or removed.
+type RetentionPolicy struct {
+	IsLocked            bool
+	RetentionPeriodDays int
+}
+
+// ProjectBudgetConfig mirrors the TF foundation's project_budget variable (H2).
+// Each field controls budget amounts and alerting per project.
+// Amount defaults to 1000, AlertSpentPercents defaults to [1.2].
+type ProjectBudgetConfig struct {
+	// Per-project budget amounts (in billing account currency, e.g. USD)
+	OrgLoggingBudgetAmount     float64
+	OrgBillingExportAmount     float64
+	OrgSCCBudgetAmount         float64
+	OrgKMSBudgetAmount         float64
+	OrgSecretsBudgetAmount     float64
+	OrgDNSHubBudgetAmount      float64
+	OrgInterconnectBudgetAmount float64
+	OrgNetHubBudgetAmount      float64
+
+	// Shared alert thresholds (defaults: [1.2])
+	AlertSpentPercents []float64
+
+	// Optional per-project Pub/Sub topics for budget notifications
+	OrgLoggingAlertPubSubTopic     string
+	OrgSCCAlertPubSubTopic         string
+	OrgNetHubAlertPubSubTopic      string
+}
+
 // OrgConfig holds all configuration for the organization stage.
+// This mirrors all variables from the Terraform foundation's 1-org/envs/shared/variables.tf.
 type OrgConfig struct {
-	OrgID                            string
-	BillingAccount                   string
-	ProjectPrefix                    string
-	FolderPrefix                     string
-	DefaultRegion                    string
-	Parent                           string
-	ParentFolder                     string
-	BootstrapStackName               string
-	DomainsToAllow                   []string
-	EssentialContactsDomains         []string
-	SCCNotificationFilter            string
+	// Core identifiers
+	OrgID          string
+	BillingAccount string
+	ProjectPrefix  string
+	FolderPrefix   string
+	DefaultRegion  string
+	Parent         string
+	ParentFolder   string
+	ParentID       string // Numeric ID (folder or org)
+	ParentType     string // "organization" or "folder"
+
+	// Bootstrap cross-reference
+	BootstrapStackName  string
+	BootstrapFolderName string // Resolved from StackReference or config
+
+	// Governance groups (from bootstrap required_groups/optional_groups)
+	AuditDataUsers        string
+	BillingDataUsers      string
+	GCPSecurityReviewer   string
+	GCPNetworkViewer      string
+	GCPSCCAdmin           string
+	GCPGlobalSecretsAdmin string
+	GCPKMSAdmin           string
+
+	// Domain restrictions
+	DomainsToAllow           []string
+	EssentialContactsDomains []string
+
+	// SCC
+	SCCNotificationName   string
+	SCCNotificationFilter string
+	EnableSCCResources    bool
+
+	// Policies
 	CreateAccessContextManagerPolicy bool
-	RandomSuffix                     bool
+	EnforceAllowedWorkerPools        bool
+	EnableHubAndSpoke                bool
+
+	// KMS
+	EnableKMSKeyUsageTracking bool
+
+	// Projects
+	RandomSuffix             bool
+	ProjectDeletionPolicy    string
+	FolderDeletionProtection bool
+	DefaultServiceAccount    string
+
+	// Project Budgets (H2)
+	ProjectBudget *ProjectBudgetConfig
+
+	// Logging — storage options (H6, H7, H8)
+	LogExportStorageLocation       string
+	LogExportStorageForceDestroy   bool
+	LogExportStorageVersioning     bool
+	LogExportStorageRetentionPolicy *RetentionPolicy
+
+	// Logging — billing export
+	BillingExportDatasetLocation string
+
+	// Essential Contacts (H9)
+	EssentialContactsLanguage string
+
+	// Tags (H14)
+	CreateUniqueTagKey bool
 }
 
 func loadOrgConfig(ctx *pulumi.Context) *OrgConfig {
@@ -115,8 +256,50 @@ func loadOrgConfig(ctx *pulumi.Context) *OrgConfig {
 		FolderPrefix:       conf.Get("folder_prefix"),
 		DefaultRegion:      conf.Get("default_region"),
 		BootstrapStackName: conf.Require("bootstrap_stack_name"),
-		SCCNotificationFilter:            conf.Get("scc_notification_filter"),
-		CreateAccessContextManagerPolicy: conf.Get("create_access_context_manager_policy") == "true",
+
+		// Governance groups — pulled from bootstrap outputs or overridden locally
+		AuditDataUsers:        conf.Get("audit_data_users"),
+		BillingDataUsers:      conf.Get("billing_data_users"),
+		GCPSecurityReviewer:   conf.Get("gcp_security_reviewer"),
+		GCPNetworkViewer:      conf.Get("gcp_network_viewer"),
+		GCPSCCAdmin:           conf.Get("gcp_scc_admin"),
+		GCPGlobalSecretsAdmin: conf.Get("gcp_global_secrets_admin"),
+		GCPKMSAdmin:           conf.Get("gcp_kms_admin"),
+
+		// SCC
+		SCCNotificationName:   conf.Get("scc_notification_name"),
+		SCCNotificationFilter: conf.Get("scc_notification_filter"),
+		EnableSCCResources:    conf.Get("enable_scc_resources") != "false",
+
+		// Policies
+		CreateAccessContextManagerPolicy: conf.Get("create_access_context_manager_policy") != "false",
+		EnforceAllowedWorkerPools:        conf.Get("enforce_allowed_worker_pools") == "true",
+		EnableHubAndSpoke:                conf.Get("enable_hub_and_spoke") == "true",
+
+		// KMS
+		EnableKMSKeyUsageTracking: conf.Get("enable_kms_key_usage_tracking") != "false",
+
+		// Projects
+		ProjectDeletionPolicy:    conf.Get("project_deletion_policy"),
+		FolderDeletionProtection: conf.Get("folder_deletion_protection") != "false",
+		DefaultServiceAccount:    conf.Get("default_service_account"),
+
+		// Logging storage options (H6, H7)
+		LogExportStorageLocation:     conf.Get("log_export_storage_location"),
+		LogExportStorageForceDestroy: conf.Get("log_export_storage_force_destroy") == "true",
+		LogExportStorageVersioning:   conf.Get("log_export_storage_versioning") != "false",
+
+		// Logging billing export
+		BillingExportDatasetLocation: conf.Get("billing_export_dataset_location"),
+
+		// Essential Contacts (H9)
+		EssentialContactsLanguage: conf.Get("essential_contacts_language"),
+
+		// Tags
+		CreateUniqueTagKey: conf.Get("create_unique_tag_key") == "true",
+
+		// Bootstrap
+		BootstrapFolderName: conf.Get("bootstrap_folder_name"),
 	}
 
 	// Random suffix defaults to true, matching upstream Terraform foundation.
@@ -144,13 +327,42 @@ func loadOrgConfig(ctx *pulumi.Context) *OrgConfig {
 	if c.SCCNotificationFilter == "" {
 		c.SCCNotificationFilter = "state=\"ACTIVE\""
 	}
+	if c.SCCNotificationName == "" {
+		c.SCCNotificationName = "scc-notify"
+	}
+	if c.ProjectDeletionPolicy == "" {
+		c.ProjectDeletionPolicy = "PREVENT"
+	}
+	if c.EssentialContactsLanguage == "" {
+		c.EssentialContactsLanguage = "en"
+	}
+
+	// Log storage retention policy (H8)
+	if retentionDays := conf.GetInt("log_export_storage_retention_days"); retentionDays > 0 {
+		c.LogExportStorageRetentionPolicy = &RetentionPolicy{
+			IsLocked:            conf.Get("log_export_storage_retention_locked") == "true",
+			RetentionPeriodDays: retentionDays,
+		}
+	}
+
+	// Storage location defaults to DefaultRegion when not set
+	if c.LogExportStorageLocation == "" {
+		c.LogExportStorageLocation = c.DefaultRegion
+	}
+	if c.BillingExportDatasetLocation == "" {
+		c.BillingExportDatasetLocation = c.DefaultRegion
+	}
 
 	parentFolder := conf.Get("parent_folder")
 	if parentFolder != "" {
 		c.Parent = "folders/" + parentFolder
 		c.ParentFolder = parentFolder
+		c.ParentID = parentFolder
+		c.ParentType = "folder"
 	} else {
 		c.Parent = "organizations/" + c.OrgID
+		c.ParentID = c.OrgID
+		c.ParentType = "organization"
 	}
 
 	return c
