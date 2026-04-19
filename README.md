@@ -110,14 +110,21 @@ example-organization
 
 ## Branching Strategy
 
-The CI/CD pipeline (`.github/workflows/pulumi-ci.yml`) follows the same strategy as the Terraform foundation:
+The CI/CD pipeline (`.github/workflows/pulumi-ci.yml`) uses a trunk-based development model. The branching model varies by stage:
 
-| Branch | Environment | Trigger |
-|--------|-------------|---------|
-| `development` | Development | `pulumi up` on merge |
-| `nonproduction` | Non-production | `pulumi up` on merge |
-| `production` | Production + Shared | `pulumi up` on merge |
-| Feature branches | All (preview only) | `pulumi preview` on PR |
+| Stage | Branches | Rationale |
+|-------|----------|-----------|
+| `0-bootstrap` | `production` | Shared infrastructure — single environment |
+| `1-org` | `production` | Organization-wide resources — single environment |
+| `2-environments` | `development`, `nonproduction`, `production` | Per-environment resources |
+| `3-networks-*` | `development`, `nonproduction`, `production` | Per-environment networks |
+| `4-projects` | `development`, `nonproduction`, `production` | Per-environment projects |
+| `5-app-infra` | `development`, `nonproduction`, `production` | Per-environment app infra |
+
+| Action | Trigger |
+|--------|---------|
+| Merge to a named branch | `pulumi up` (apply) |
+| Pull Request to a named branch | `pulumi preview` (plan only) |
 
 ## Prerequisites
 
@@ -159,7 +166,9 @@ Some configuration values used to deploy the stages have defaults. Check those *
 - [Troubleshooting Guide](./docs/TROUBLESHOOTING.md) — Solutions for common deployment issues
 - [Glossary](./docs/GLOSSARY.md) — Definitions of key terms used throughout the documentation
 - [FAQ](./docs/FAQ.md) — Frequently asked questions about the foundation
+- [Errata](./docs/ERRATA.md) — Known deviations from the upstream Terraform foundation
 - [Onboarding Guide](./ONBOARDING.md) — Step-by-step quickstart for deploying your foundation
+- [Contributing](./CONTRIBUTING.md) — Development workflow and contribution guidelines
 
 ## Public vs. Private
 - This repo is a **Public Reference**.
