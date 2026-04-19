@@ -56,7 +56,7 @@ func deployBusinessUnitProjects(ctx *pulumi.Context, cfg *ProjectsConfig, folder
 		Name:            pulumi.String(fmt.Sprintf("%s-%s-%s-sample-svpc", cfg.ProjectPrefix, cfg.EnvCode, cfg.BusinessCode)),
 		FolderID:        folderID,
 		BillingAccount:  pulumi.String(cfg.BillingAccount),
-		RandomProjectID: true,
+		RandomProjectID: cfg.RandomSuffix,
 		ActivateApis:    standardAPIs,
 	})
 	if err != nil {
@@ -79,7 +79,7 @@ func deployBusinessUnitProjects(ctx *pulumi.Context, cfg *ProjectsConfig, folder
 		Name:            pulumi.String(fmt.Sprintf("%s-%s-%s-sample-floating", cfg.ProjectPrefix, cfg.EnvCode, cfg.BusinessCode)),
 		FolderID:        folderID,
 		BillingAccount:  pulumi.String(cfg.BillingAccount),
-		RandomProjectID: true,
+		RandomProjectID: cfg.RandomSuffix,
 		ActivateApis:    standardAPIs,
 	})
 	if err != nil {
@@ -94,7 +94,7 @@ func deployBusinessUnitProjects(ctx *pulumi.Context, cfg *ProjectsConfig, folder
 		Name:            pulumi.String(fmt.Sprintf("%s-%s-%s-sample-peering", cfg.ProjectPrefix, cfg.EnvCode, cfg.BusinessCode)),
 		FolderID:        folderID,
 		BillingAccount:  pulumi.String(cfg.BillingAccount),
-		RandomProjectID: true,
+		RandomProjectID: cfg.RandomSuffix,
 		ActivateApis:    standardAPIs,
 	})
 	if err != nil {
@@ -117,7 +117,7 @@ func deployInfraPipelineProject(ctx *pulumi.Context, cfg *ProjectsConfig, common
 		Name:            pulumi.String(fmt.Sprintf("%s-c-%s-infra-pipeline", cfg.ProjectPrefix, cfg.BusinessCode)),
 		FolderID:        commonFolderID,
 		BillingAccount:  pulumi.String(cfg.BillingAccount),
-		RandomProjectID: true,
+		RandomProjectID: cfg.RandomSuffix,
 		ActivateApis: []string{
 			"cloudbuild.googleapis.com",
 			"artifactregistry.googleapis.com",

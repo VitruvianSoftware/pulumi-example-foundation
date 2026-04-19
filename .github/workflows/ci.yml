@@ -50,8 +50,14 @@ jobs:
           - 4-projects
           - 5-app-infra
     steps:
-      - name: Checkout code
+      - name: Checkout foundation
         uses: actions/checkout@v4
+
+      - name: Checkout pulumi-library
+        uses: actions/checkout@v4
+        with:
+          repository: VitruvianSoftware/pulumi-library
+          path: _pulumi-library
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -59,9 +65,17 @@ jobs:
           go-version-file: ${{ matrix.stage }}/go.mod
           cache-dependency-path: ${{ matrix.stage }}/go.sum
 
+      # Rewrite the local filesystem replace directive to point to the
+      # checked-out library. This mirrors the go.work setup used locally
+      # but works in CI where absolute paths differ.
+      - name: Fix replace directive
+        working-directory: ${{ matrix.stage }}
+        run: |
+          go mod edit -replace github.com/VitruvianSoftware/pulumi-library=${{ github.workspace }}/_pulumi-library
+
       - name: Tidy
         working-directory: ${{ matrix.stage }}
-        run: go mod tidy && git diff --exit-code
+        run: go mod tidy
 
       - name: Vet
         working-directory: ${{ matrix.stage }}

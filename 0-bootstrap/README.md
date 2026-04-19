@@ -348,6 +348,7 @@ The following steps guide you through deploying without using the CI/CD pipeline
 | `parent_folder` | Numeric folder ID to deploy under instead of org root. | `""` (org root) |
 | `org_policy_admin_role` | Grant additional Org Policy Admin role to admin group. | `"false"` |
 | `bucket_force_destroy` | Allow deletion of state bucket even if it contains objects. | `"false"` |
+| `random_suffix` | Append a random hex suffix to project IDs and bucket names to prevent collisions. Set to `"false"` for deterministic naming. | `"true"` |
 
 ## Outputs
 

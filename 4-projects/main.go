@@ -89,6 +89,7 @@ type ProjectsConfig struct {
 	ProjectPrefix  string
 	FolderPrefix   string
 	OrgStackName   string
+	RandomSuffix   bool
 }
 
 func loadProjectsConfig(ctx *pulumi.Context) *ProjectsConfig {
@@ -114,6 +115,9 @@ func loadProjectsConfig(ctx *pulumi.Context) *ProjectsConfig {
 	if c.EnvCode == "" {
 		c.EnvCode = c.Env[:1]
 	}
+
+	randomSuffix := conf.Get("random_suffix")
+	c.RandomSuffix = randomSuffix != "false"
 
 	return c
 }

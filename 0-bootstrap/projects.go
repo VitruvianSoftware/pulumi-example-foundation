@@ -49,7 +49,7 @@ func deploySeedProject(ctx *pulumi.Context, cfg *Config, folderID pulumi.StringO
 		Name:            pulumi.String(fmt.Sprintf("%s-b-seed", cfg.ProjectPrefix)),
 		FolderID:        folderID,
 		BillingAccount:  pulumi.String(cfg.BillingAccount),
-		RandomProjectID: true,
+		RandomProjectID: cfg.RandomSuffix,
 		ActivateApis: []string{
 			"serviceusage.googleapis.com",
 			"servicenetworking.googleapis.com",
@@ -98,16 +98,21 @@ func deploySeedProject(ctx *pulumi.Context, cfg *Config, folderID pulumi.StringO
 		return nil, err
 	}
 
-	// Random suffix for the state bucket name, independent of the project ID
-	// suffix. This matches the upstream bootstrap module which uses a separate
+	// When RandomSuffix is enabled, append a random hex suffix to the bucket
+	// name. This matches the upstream bootstrap module which uses a separate
 	// random_id resource (byte_length=2) for the GCS bucket name.
-	bucketSuffix, err := random.NewRandomId(ctx, "state-bucket-suffix", &random.RandomIdArgs{
-		ByteLength: pulumi.Int(2),
-	})
-	if err != nil {
-		return nil, err
+	var stateBucketName pulumi.StringInput
+	if cfg.RandomSuffix {
+		bucketSuffix, err := random.NewRandomId(ctx, "state-bucket-suffix", &random.RandomIdArgs{
+			ByteLength: pulumi.Int(2),
+		})
+		if err != nil {
+			return nil, err
+		}
+		stateBucketName = pulumi.Sprintf("%s-%s-b-seed-tfstate-%s", cfg.BucketPrefix, cfg.ProjectPrefix, bucketSuffix.Hex)
+	} else {
+		stateBucketName = pulumi.String(fmt.Sprintf("%s-%s-b-seed-tfstate", cfg.BucketPrefix, cfg.ProjectPrefix))
 	}
-	stateBucketName := pulumi.Sprintf("%s-%s-b-seed-tfstate-%s", cfg.BucketPrefix, cfg.ProjectPrefix, bucketSuffix.Hex)
 
 	// State bucket with KMS encryption, versioning, and uniform bucket-level access.
 	stateBucket, err := storage.NewBucket(ctx, "tf-state-bucket", &storage.BucketArgs{
@@ -143,7 +148,7 @@ func deployCICDProject(ctx *pulumi.Context, cfg *Config, folderID pulumi.StringO
 		Name:            pulumi.String(fmt.Sprintf("%s-b-cicd", cfg.ProjectPrefix)),
 		FolderID:        folderID,
 		BillingAccount:  pulumi.String(cfg.BillingAccount),
-		RandomProjectID: true,
+		RandomProjectID: cfg.RandomSuffix,
 		ActivateApis: []string{
 			"serviceusage.googleapis.com",
 			"servicenetworking.googleapis.com",
