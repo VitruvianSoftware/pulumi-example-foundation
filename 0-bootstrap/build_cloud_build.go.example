@@ -1,0 +1,192 @@
+// Copyright 2026 Vitruvian Software
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// ============================================================================
+// Cloud Build CI/CD Provider — Example
+// ============================================================================
+//
+// This file is an EXAMPLE showing how to replace the default GitHub Actions
+// CI/CD provider with Google Cloud Build. This mirrors the Terraform
+// foundation's default `build_cb.tf` configuration.
+//
+// To use Cloud Build instead of GitHub Actions:
+//
+// 1. Rename this file: build_cloud_build.go.example → build_cloud_build.go
+// 2. Remove or rename: build_github_actions.go → build_github_actions.go.bak
+// 3. Update main.go to call deployCloudBuild() instead of deployGitHubActionsBuild()
+// 4. Add the required config values to your Pulumi.<stack>.yaml:
+//
+//    config:
+//      cloud_build_private_pool_subnet: "10.3.0.0/24"
+//
+// 5. Run `pulumi up` to provision the Cloud Build infrastructure.
+//
+// ============================================================================
+// WHAT THIS CREATES:
+//
+// 1. Cloud Source Repositories — one per foundation stage + policies + cloudbuilder
+// 2. Artifact Registry — hosts the custom Pulumi Docker image
+// 3. Cloud Build Private Worker Pool — runs builds within your VPC
+// 4. Cloud Build Triggers — per-stage plan/apply triggers
+// 5. Cloud Build Workspaces — log and artifact buckets per stage
+// ============================================================================
+
+package main
+
+import (
+	"fmt"
+
+	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/artifactregistry"
+	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/cloudbuild"
+	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/serviceaccount"
+	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/sourcerepo"
+	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
+)
+
+// CloudBuildOutputs holds the outputs from Cloud Build provisioning.
+type CloudBuildOutputs struct {
+	CloudBuildProjectID pulumi.StringOutput
+	ArtifactRepoName    pulumi.StringOutput
+	SourceRepos         map[string]pulumi.StringOutput
+}
+
+// deployCloudBuild provisions the Cloud Build CI/CD infrastructure in the
+// CI/CD project. This mirrors the Terraform foundation's build_cb.tf.
+//
+// To use this function, update main.go:
+//
+//	// Replace:
+//	buildOutputs, err := deployGitHubActionsBuild(ctx, cfg, cicd, sas)
+//	// With:
+//	buildOutputs, err := deployCloudBuild(ctx, cfg, cicd, sas)
+func deployCloudBuild(ctx *pulumi.Context, cfg *Config, cicd *CICDProject, sas map[string]*serviceaccount.Account) (*CloudBuildOutputs, error) {
+	outputs := &CloudBuildOutputs{}
+
+	// Stage → Cloud Source Repo name mapping
+	stageRepos := map[string]string{
+		"bootstrap": "gcp-bootstrap",
+		"org":       "gcp-org",
+		"env":       "gcp-environments",
+		"net":       "gcp-networks",
+		"proj":      "gcp-projects",
+	}
+
+	baseRepos := []string{"gcp-policies", "pulumi-cloudbuilder"}
+
+	// ========================================================================
+	// 1. Cloud Source Repositories
+	// Create a CSR repo for each foundation stage plus base repos.
+	// ========================================================================
+	allRepoNames := make([]string, 0)
+	for _, name := range stageRepos {
+		allRepoNames = append(allRepoNames, name)
+	}
+	allRepoNames = append(allRepoNames, baseRepos...)
+
+	outputs.SourceRepos = make(map[string]pulumi.StringOutput)
+	for _, repoName := range allRepoNames {
+		repo, err := sourcerepo.NewRepository(ctx, fmt.Sprintf("csr-%s", repoName), &sourcerepo.RepositoryArgs{
+			Project: cicd.ProjectID,
+			Name:    pulumi.String(repoName),
+		})
+		if err != nil {
+			return nil, err
+		}
+		outputs.SourceRepos[repoName] = repo.Name
+	}
+
+	// ========================================================================
+	// 2. Artifact Registry
+	// Hosts the custom Pulumi Docker image used by Cloud Build.
+	// ========================================================================
+	arRepo, err := artifactregistry.NewRepository(ctx, "pulumi-builder-repo", &artifactregistry.RepositoryArgs{
+		Project:      cicd.ProjectID,
+		RepositoryId: pulumi.String("pulumi-builders"),
+		Location:     pulumi.String(cfg.DefaultRegion),
+		Format:       pulumi.String("DOCKER"),
+		Description:  pulumi.String("Pulumi builder images for Cloud Build. Managed by Pulumi."),
+	})
+	if err != nil {
+		return nil, err
+	}
+	outputs.ArtifactRepoName = arRepo.Name
+
+	// Grant each SA read access to the artifact registry
+	for key, sa := range sas {
+		_, err := artifactregistry.NewRepositoryIamMember(ctx, fmt.Sprintf("ar-reader-%s", key), &artifactregistry.RepositoryIamMemberArgs{
+			Project:    cicd.ProjectID,
+			Location:   pulumi.String(cfg.DefaultRegion),
+			Repository: arRepo.RepositoryId,
+			Role:       pulumi.String("roles/artifactregistry.reader"),
+			Member: sa.Email.ApplyT(func(email string) string {
+				return fmt.Sprintf("serviceAccount:%s", email)
+			}).(pulumi.StringOutput),
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// ========================================================================
+	// 3. Cloud Build Triggers
+	// Per-stage plan and apply triggers linked to Cloud Source Repos.
+	// ========================================================================
+	for key, repoName := range stageRepos {
+		sa := sas[key]
+
+		// Plan trigger — runs on any branch push
+		_, err := cloudbuild.NewTrigger(ctx, fmt.Sprintf("cb-plan-%s", key), &cloudbuild.TriggerArgs{
+			Project:     cicd.ProjectID,
+			Name:        pulumi.String(fmt.Sprintf("plan-%s", key)),
+			Description: pulumi.String(fmt.Sprintf("Pulumi preview for %s stage. Managed by Pulumi.", key)),
+			Filename:    pulumi.String("cloudbuild-pulumi-plan.yaml"),
+			Location:    pulumi.String(cfg.DefaultRegion),
+			ServiceAccount: sa.Email.ApplyT(func(email string) string {
+				return fmt.Sprintf("projects/%s/serviceAccounts/%s", cfg.ProjectPrefix+"-b-cicd", email)
+			}).(pulumi.StringOutput),
+			TriggerTemplate: &cloudbuild.TriggerTriggerTemplateArgs{
+				ProjectId: cicd.ProjectID,
+				RepoName:  pulumi.String(repoName),
+				BranchName: pulumi.String(".*"),
+			},
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		// Apply trigger — runs only on main branch
+		_, err = cloudbuild.NewTrigger(ctx, fmt.Sprintf("cb-apply-%s", key), &cloudbuild.TriggerArgs{
+			Project:     cicd.ProjectID,
+			Name:        pulumi.String(fmt.Sprintf("apply-%s", key)),
+			Description: pulumi.String(fmt.Sprintf("Pulumi up for %s stage. Managed by Pulumi.", key)),
+			Filename:    pulumi.String("cloudbuild-pulumi-apply.yaml"),
+			Location:    pulumi.String(cfg.DefaultRegion),
+			ServiceAccount: sa.Email.ApplyT(func(email string) string {
+				return fmt.Sprintf("projects/%s/serviceAccounts/%s", cfg.ProjectPrefix+"-b-cicd", email)
+			}).(pulumi.StringOutput),
+			TriggerTemplate: &cloudbuild.TriggerTriggerTemplateArgs{
+				ProjectId:  cicd.ProjectID,
+				RepoName:   pulumi.String(repoName),
+				BranchName: pulumi.String("^main$"),
+			},
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	outputs.CloudBuildProjectID = cicd.ProjectID
+
+	return outputs, nil
+}

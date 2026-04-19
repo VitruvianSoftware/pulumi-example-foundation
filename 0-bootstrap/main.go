@@ -29,9 +29,10 @@ func main() {
 
 		// 2. Create the Bootstrap Folder
 		bootstrapFolder, err := organizations.NewFolder(ctx, "bootstrap-folder", &organizations.FolderArgs{
-			DisplayName: pulumi.String(cfg.FolderPrefix + "-bootstrap"),
-			Parent:      pulumi.String(cfg.Parent),
-		})
+			DisplayName:        pulumi.String(cfg.FolderPrefix + "-bootstrap"),
+			Parent:             pulumi.String(cfg.Parent),
+			DeletionProtection: pulumi.Bool(true),
+		}, pulumi.Protect(true))
 		if err != nil {
 			return err
 		}
@@ -59,6 +60,12 @@ func main() {
 			return err
 		}
 
+		// 5b. Deploy CI/CD Build Infrastructure (GitHub Actions WIF by default)
+		buildOutputs, err := deployGitHubActionsBuild(ctx, cfg, cicd, sas)
+		if err != nil {
+			return err
+		}
+
 		// 6. Exports
 		ctx.Export("seed_project_id", seed.ProjectID)
 		ctx.Export("cicd_project_id", cicd.ProjectID)
@@ -67,6 +74,43 @@ func main() {
 		ctx.Export("state_bucket_kms_key_id", seed.KMSKeyID)
 		for key, sa := range sas {
 			ctx.Export(key+"_sa_email", sa.Email)
+		}
+
+		// 7. Common config — composite output consumed by all downstream
+		// stages via Stack References. Mirrors Terraform's common_config output.
+		ctx.Export("common_config", pulumi.Map{
+			"org_id":                pulumi.String(cfg.OrgID),
+			"parent_folder":         pulumi.String(cfg.ParentFolder),
+			"billing_account":       pulumi.String(cfg.BillingAccount),
+			"default_region":        pulumi.String(cfg.DefaultRegion),
+			"default_region_2":      pulumi.String(cfg.DefaultRegion2),
+			"default_region_gcs":    pulumi.String(cfg.DefaultRegionGCS),
+			"default_region_kms":    pulumi.String(cfg.DefaultRegionKMS),
+			"project_prefix":        pulumi.String(cfg.ProjectPrefix),
+			"folder_prefix":         pulumi.String(cfg.FolderPrefix),
+			"parent_id":             pulumi.String(cfg.Parent),
+			"bootstrap_folder_name": bootstrapFolder.Name,
+		})
+
+		// 8. Group outputs — consumed by 1-org for IAM bindings.
+		ctx.Export("required_groups", pulumi.Map{
+			"group_org_admins":     pulumi.String(cfg.GroupOrgAdmins),
+			"group_billing_admins": pulumi.String(cfg.GroupBillingAdmins),
+			"billing_data_users":   pulumi.String(cfg.BillingDataUsers),
+			"audit_data_users":     pulumi.String(cfg.AuditDataUsers),
+		})
+		ctx.Export("optional_groups", pulumi.Map{
+			"gcp_security_reviewer":    pulumi.String(cfg.GCPSecurityReviewer),
+			"gcp_network_viewer":       pulumi.String(cfg.GCPNetworkViewer),
+			"gcp_scc_admin":            pulumi.String(cfg.GCPSCCAdmin),
+			"gcp_global_secrets_admin": pulumi.String(cfg.GCPGlobalSecretsAdmin),
+			"gcp_kms_admin":            pulumi.String(cfg.GCPKMSAdmin),
+		})
+
+		// 9. CI/CD build outputs (WIF)
+		if cfg.GitHubOwner != "" {
+			ctx.Export("wif_pool_name", buildOutputs.WIFPoolName)
+			ctx.Export("wif_provider_name", buildOutputs.WIFProviderName)
 		}
 
 		return nil
@@ -84,6 +128,8 @@ type Config struct {
 	DefaultRegion    string
 	DefaultRegion2   string
 	DefaultRegionGCS string
+	DefaultRegionKMS    string // Dedicated KMS region (default: "us"), matches upstream
+	KMSKeyProtectionLevel string // "SOFTWARE" or "HSM" — matches upstream key_protection_level
 	Parent           string // Full parent path: "organizations/123" or "folders/456"
 	ParentFolder     string // Raw folder ID, empty if deploying at org root
 	ParentType       string // "organization" or "folder"
@@ -91,11 +137,30 @@ type Config struct {
 	OrgPolicyAdminRole bool
 	BucketForceDestroy bool
 	RandomSuffix       bool // Append random hex suffix to project IDs (default: true)
+
 	// Groups — required for org admin and billing workflows
 	GroupOrgAdmins     string
 	GroupBillingAdmins string
 	BillingDataUsers   string
 	AuditDataUsers     string
+
+	// Optional groups — governance groups consumed by 1-org for IAM bindings.
+	// These match the upstream Terraform foundation's optional_groups object.
+	GCPSecurityReviewer    string
+	GCPNetworkViewer       string
+	GCPSCCAdmin            string
+	GCPGlobalSecretsAdmin  string
+	GCPKMSAdmin            string
+
+	// GitHub Actions CI/CD — default CI/CD provider.
+	// Set github_owner to enable Workload Identity Federation.
+	GitHubOwner             string
+	GitHubRepoBootstrap     string
+	GitHubRepoOrg           string
+	GitHubRepoEnv           string
+	GitHubRepoNet           string
+	GitHubRepoProj          string
+	WIFAttributeCondition   string // Optional: override the default WIF attribute condition
 }
 
 func loadConfig(ctx *pulumi.Context) *Config {
@@ -109,11 +174,27 @@ func loadConfig(ctx *pulumi.Context) *Config {
 		DefaultRegion:      conf.Get("default_region"),
 		DefaultRegion2:     conf.Get("default_region_2"),
 		DefaultRegionGCS:   conf.Get("default_region_gcs"),
-		ParentFolder:       conf.Get("parent_folder"),
+		DefaultRegionKMS:     conf.Get("default_region_kms"),
+		KMSKeyProtectionLevel: conf.Get("kms_key_protection_level"),
+		ParentFolder:         conf.Get("parent_folder"),
 		GroupOrgAdmins:     conf.Require("group_org_admins"),
 		GroupBillingAdmins: conf.Require("group_billing_admins"),
 		BillingDataUsers:   conf.Require("billing_data_users"),
 		AuditDataUsers:     conf.Require("audit_data_users"),
+		// Optional groups — empty string means not configured
+		GCPSecurityReviewer:   conf.Get("gcp_security_reviewer"),
+		GCPNetworkViewer:      conf.Get("gcp_network_viewer"),
+		GCPSCCAdmin:           conf.Get("gcp_scc_admin"),
+		GCPGlobalSecretsAdmin: conf.Get("gcp_global_secrets_admin"),
+		GCPKMSAdmin:           conf.Get("gcp_kms_admin"),
+		// GitHub Actions CI/CD
+		GitHubOwner:           conf.Get("github_owner"),
+		GitHubRepoBootstrap:   conf.Get("github_repo_bootstrap"),
+		GitHubRepoOrg:         conf.Get("github_repo_org"),
+		GitHubRepoEnv:         conf.Get("github_repo_env"),
+		GitHubRepoNet:         conf.Get("github_repo_net"),
+		GitHubRepoProj:        conf.Get("github_repo_proj"),
+		WIFAttributeCondition: conf.Get("wif_attribute_condition"),
 	}
 
 	c.OrgPolicyAdminRole = conf.Get("org_policy_admin_role") == "true"
@@ -142,6 +223,12 @@ func loadConfig(ctx *pulumi.Context) *Config {
 	}
 	if c.DefaultRegionGCS == "" {
 		c.DefaultRegionGCS = "US"
+	}
+	if c.DefaultRegionKMS == "" {
+		c.DefaultRegionKMS = "us"
+	}
+	if c.KMSKeyProtectionLevel == "" {
+		c.KMSKeyProtectionLevel = "SOFTWARE"
 	}
 
 	// Determine parent: either a specific folder or the org root.
