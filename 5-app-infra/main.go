@@ -27,7 +27,11 @@ func main() {
 	pulumi.Run(func(ctx *pulumi.Context) error {
 		cfg := loadAppInfraConfig(ctx)
 
-		// 1. Resolve Project IDs from stack
+		// 1. Resolve Project IDs from the Stage 4 stack.
+		// Stage 4 exports: svpc_project_id, floating_project_id,
+		// peering_project_id, infra_pipeline_project_id.
+		// We use the SVPC project for the app and the floating project for data,
+		// matching a typical pattern where apps run in the VPC-attached project.
 		projStack, err := pulumi.NewStackReference(ctx, "projects", &pulumi.StackReferenceArgs{
 			Name: pulumi.String(cfg.ProjectsStackName),
 		})
@@ -35,8 +39,10 @@ func main() {
 			return err
 		}
 
-		appProjectID := projStack.GetOutput(pulumi.String("app_project_id")).(pulumi.StringOutput)
-		dataProjectID := projStack.GetOutput(pulumi.String("data_project_id")).(pulumi.StringOutput)
+		// Use GetStringOutput (returns a typed StringOutput) instead of
+		// GetOutput + unsafe type assertion which panics on nil.
+		appProjectID := projStack.GetStringOutput(pulumi.String("svpc_project_id"))
+		dataProjectID := projStack.GetStringOutput(pulumi.String("floating_project_id"))
 
 		// 2. Deploy Data Platform using the reusable Data component
 		_, err = data.NewDataPlatform(ctx, "airline-data", &data.DataPlatformArgs{
@@ -47,11 +53,11 @@ func main() {
 			return err
 		}
 
-		// 3. Deploy Web App using the reusable App component
+		// 3. Deploy Web App using the reusable App component (Cloud Run v2)
 		_, err = app.NewCloudRunApp(ctx, "chat-demo", &app.CloudRunAppArgs{
 			ProjectID: appProjectID,
 			Name:      pulumi.String("chat-demo"),
-			Image:     pulumi.String("gcr.io/cloudrun/hello"),
+			Image:     pulumi.String("us-docker.pkg.dev/cloudrun/container/hello"),
 			Region:    pulumi.String(cfg.Region),
 		})
 		if err != nil {

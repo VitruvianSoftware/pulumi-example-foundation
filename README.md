@@ -1,17 +1,141 @@
-# Vitruvian Software Pulumi Foundation (Public)
+# Vitruvian Software Pulumi Foundation
 
-This repository provides a reference implementation of the Google Cloud Enterprise Foundation, built using Pulumi and Go.
+This repository provides a production-ready implementation of the [Google Cloud Enterprise Foundations Blueprint](https://cloud.google.com/architecture/security-foundations), built using **Pulumi** and **Go**.
+
+It is a port of Google's [terraform-example-foundation](https://github.com/terraform-google-modules/terraform-example-foundation), providing the same security baseline, organizational structure, and operational patterns in a native programming language.
 
 ## Overview
-It demonstrates how to deploy the foundational stages of a secure GCP organization using the [Vitruvian Software Pulumi Library](https://github.com/VitruvianSoftware/pulumi-library).
 
-### Stages
-- **0-bootstrap**: Org-level bootstrapping.
-- **1-org**: Organization resources and logging.
-- **2-environments**: Environment folder structures.
-- **3-networks**: Networking stack (SVPC or Hub-and-Spoke).
-- **4-projects**: Business unit project management.
-- **5-app-infra**: Sample application deployment.
+This repo contains several distinct Pulumi projects, each within their own directory that must be applied separately, but in sequence. Stage `0-bootstrap` is manually executed, and subsequent stages are executed using the included GitHub Actions CI/CD pipeline.
+
+### [0. Bootstrap](./0-bootstrap/)
+
+Bootstraps the GCP organization by creating:
+- **`prj-b-seed`** — Terraform/Pulumi state storage with KMS-encrypted bucket, and the service accounts used by the pipeline
+- **`prj-b-cicd`** — CI/CD pipeline infrastructure (Artifact Registry, Cloud Build, Workload Identity)
+- **Granular Service Accounts** — One per stage (`bootstrap`, `org`, `env`, `net`, `proj`) with least-privilege IAM at org, folder, project, and billing scopes
+
+### [1. Organization](./1-org/)
+
+Sets up the organizational folder structure and shared projects:
+- **Folders**: `fldr-common`, `fldr-network`, plus environment folders
+- **Common Projects**: `prj-c-logging`, `prj-c-billing-export`, `prj-c-scc`, `prj-c-kms`, `prj-c-secrets`
+- **Network Projects**: `prj-net-dns`, `prj-net-interconnect`, `prj-{d,n,p}-svpc`
+- **Org Policies**: 14+ boolean constraints (serial port, nested virtualization, OS Login, SA key creation, public access prevention, etc.) + list policies (VM external IP deny, domain-restricted sharing, protocol forwarding)
+- **Centralized Logging**: Org sinks to Storage, Pub/Sub, and Logging buckets with BigQuery linked datasets
+- **SCC Notifications**: Pub/Sub pipeline streaming all active Security Command Center findings
+- **Tags**: Org-level environment classification tags
+
+### [2. Environments](./2-environments/)
+
+Creates per-environment KMS and Secrets projects:
+- `prj-{d,n,p}-kms` — Environment-level Cloud KMS
+- `prj-{d,n,p}-secrets` — Environment-level Secret Manager
+
+### [3. Networks (Choose ONE)](./3-networks-svpc/)
+
+**Shared VPC** (`3-networks-svpc/`):
+- Multi-region subnets with GKE secondary ranges (pod + service CIDRs)
+- Shared VPC host project designation
+- Hierarchical firewall policies (IAP, health checks, Windows KMS)
+- DNS policy with logging and inbound forwarding
+- Cloud NAT on all regions with error logging
+- Private Service Access for managed services
+- Restricted Google APIs routing (`199.36.153.4/30`)
+- Default internet routes removed
+
+**Hub-and-Spoke** (`3-networks-hub-and-spoke/`):
+- Hub VPC with central routing
+- Spoke VPC with GKE secondary ranges
+- Bidirectional VPC peering with custom route export/import
+- Same firewall, DNS, NAT, and routing as SVPC
+
+### [4. Projects](./4-projects/)
+
+Creates business unit projects with:
+- BU subfolder under each environment folder
+- Three project types per BU: **SVPC-attached**, **floating**, **peering**
+- SVPC service project attachment to the host network project
+- Infrastructure pipeline project (`prj-c-{bu}-infra-pipeline`) under common folder
+
+### [5. App Infrastructure](./5-app-infra/)
+
+Sample application deployment:
+- Cloud Run service (hello-world)
+- BigQuery dataset (data platform)
+
+## Final View
+
+```
+example-organization
+└── fldr-common
+    ├── prj-c-logging
+    ├── prj-c-billing-export
+    ├── prj-c-scc
+    ├── prj-c-kms
+    ├── prj-c-secrets
+    ├── prj-c-bu1-infra-pipeline
+    └── prj-c-bu2-infra-pipeline
+└── fldr-network
+    ├── prj-net-dns
+    ├── prj-net-interconnect
+    ├── prj-d-svpc
+    ├── prj-n-svpc
+    └── prj-p-svpc
+└── fldr-development
+    ├── prj-d-kms
+    ├── prj-d-secrets
+    └── fldr-development-bu1
+        ├── prj-d-bu1-sample-svpc
+        ├── prj-d-bu1-sample-floating
+        └── prj-d-bu1-sample-peering
+└── fldr-nonproduction
+    ├── prj-n-kms
+    ├── prj-n-secrets
+    └── fldr-nonproduction-bu1
+        ├── prj-n-bu1-sample-svpc
+        ├── prj-n-bu1-sample-floating
+        └── prj-n-bu1-sample-peering
+└── fldr-production
+    ├── prj-p-kms
+    ├── prj-p-secrets
+    └── fldr-production-bu1
+        ├── prj-p-bu1-sample-svpc
+        ├── prj-p-bu1-sample-floating
+        └── prj-p-bu1-sample-peering
+└── fldr-bootstrap
+    ├── prj-b-cicd
+    └── prj-b-seed
+```
+
+## Branching Strategy
+
+The CI/CD pipeline (`.github/workflows/pulumi-ci.yml`) follows the same strategy as the Terraform foundation:
+
+| Branch | Environment | Trigger |
+|--------|-------------|---------|
+| `development` | Development | `pulumi up` on merge |
+| `nonproduction` | Non-production | `pulumi up` on merge |
+| `production` | Production + Shared | `pulumi up` on merge |
+| Feature branches | All (preview only) | `pulumi preview` on PR |
+
+## Prerequisites
+
+- Pulumi CLI installed
+- Go 1.21+ installed
+- Access to a Google Cloud Organization
+- A Billing Account ID
+- GitHub repository with `PULUMI_ACCESS_TOKEN` and `GOOGLE_CREDENTIALS` secrets
+
+## Using the Shared Library
+
+All stages use the [Vitruvian Software Pulumi Library](https://github.com/VitruvianSoftware/pulumi-library) for reusable components:
+- `pkg/project` — Project factory with API activation
+- `pkg/iam` — Multi-scope IAM member bindings
+- `pkg/policy` — Organization policy enforcement
+- `pkg/networking` — VPC and subnet management
+- `pkg/app` — Cloud Run deployment
+- `pkg/data` — BigQuery data platform
 
 ## Public vs. Private
 - This repo is a **Public Reference**.

@@ -18,7 +18,8 @@ package main
 
 import (
 	"fmt"
-	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/organizations"
+
+	"github.com/VitruvianSoftware/pulumi-library/pkg/project"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi/config"
 )
@@ -27,7 +28,7 @@ func main() {
 	pulumi.Run(func(ctx *pulumi.Context) error {
 		cfg := loadEnvConfig(ctx)
 
-		// 1. Stack Reference to Organization
+		// 1. Stack Reference to Organization stage
 		orgStack, err := pulumi.NewStackReference(ctx, "organization", &pulumi.StackReferenceArgs{
 			Name: pulumi.String(cfg.OrgStackName),
 		})
@@ -35,28 +36,72 @@ func main() {
 			return err
 		}
 
-		// 2. Deploy Environment-specific Folder (if needed, though Org stage creates them)
-		// Usually 2-environments stage manages shared projects in those folders.
-		// For simplicity, we just export/use the folder ID.
-		
-		ctx.Export("env", pulumi.String(cfg.Env))
+		// 2. For each environment, create per-env KMS and Secrets projects
+		// under the environment folders created in Stage 1.
+		envCodes := map[string]string{"development": "d", "nonproduction": "n", "production": "p"}
+
+		for env, code := range envCodes {
+			// Resolve the environment folder ID from the Org stage outputs
+			folderID := orgStack.GetStringOutput(pulumi.String(fmt.Sprintf("%s_folder_id", env)))
+
+			// KMS Project — environment-level key management
+			kmsProject, err := project.NewProject(ctx, fmt.Sprintf("env-kms-%s", env), &project.ProjectArgs{
+				ProjectID:      pulumi.String(fmt.Sprintf("%s-%s-kms", cfg.ProjectPrefix, code)),
+				Name:           pulumi.String(fmt.Sprintf("%s-%s-kms", cfg.ProjectPrefix, code)),
+				FolderID:       folderID,
+				BillingAccount: pulumi.String(cfg.BillingAccount),
+				ActivateApis: []string{
+					"cloudkms.googleapis.com",
+					"billingbudgets.googleapis.com",
+				},
+			})
+			if err != nil {
+				return err
+			}
+
+			// Secrets Project — environment-level secret storage
+			secretsProject, err := project.NewProject(ctx, fmt.Sprintf("env-secrets-%s", env), &project.ProjectArgs{
+				ProjectID:      pulumi.String(fmt.Sprintf("%s-%s-secrets", cfg.ProjectPrefix, code)),
+				Name:           pulumi.String(fmt.Sprintf("%s-%s-secrets", cfg.ProjectPrefix, code)),
+				FolderID:       folderID,
+				BillingAccount: pulumi.String(cfg.BillingAccount),
+				ActivateApis: []string{
+					"secretmanager.googleapis.com",
+					"billingbudgets.googleapis.com",
+				},
+			})
+			if err != nil {
+				return err
+			}
+
+			// Exports
+			ctx.Export(fmt.Sprintf("%s_kms_project_id", env), kmsProject.Project.ProjectId)
+			ctx.Export(fmt.Sprintf("%s_secrets_project_id", env), secretsProject.Project.ProjectId)
+			ctx.Export(fmt.Sprintf("%s_folder_id", env), folderID)
+		}
+
 		return nil
 	})
 }
 
+// EnvConfig holds configuration for the environments stage.
 type EnvConfig struct {
-	Env          string
-	OrgID        string
-	OrgStackName string
-	FolderPrefix string
+	OrgID          string
+	BillingAccount string
+	ProjectPrefix  string
+	OrgStackName   string
 }
 
 func loadEnvConfig(ctx *pulumi.Context) *EnvConfig {
 	conf := config.New(ctx, "")
-	return &EnvConfig{
-		Env:          conf.Require("env"),
-		OrgID:        conf.Require("org_id"),
-		OrgStackName: conf.Require("org_stack_name"),
-		FolderPrefix: conf.Get("folder_prefix"),
+	c := &EnvConfig{
+		OrgID:          conf.Require("org_id"),
+		BillingAccount: conf.Require("billing_account"),
+		ProjectPrefix:  conf.Get("project_prefix"),
+		OrgStackName:   conf.Require("org_stack_name"),
 	}
+	if c.ProjectPrefix == "" {
+		c.ProjectPrefix = "prj"
+	}
+	return c
 }

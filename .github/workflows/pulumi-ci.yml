@@ -1,0 +1,163 @@
+# Pulumi Foundation CI/CD Pipeline
+#
+# This workflow provides the same branching strategy as the Terraform
+# foundation's Cloud Build pipeline:
+#   - Pull Requests trigger `pulumi preview` (plan) across all stages
+#   - Merges to environment branches trigger `pulumi up` (apply)
+#
+# Branch strategy:
+#   - development   → applies to the development environment
+#   - nonproduction  → applies to the nonproduction environment
+#   - production     → applies to the production environment
+#   - shared resources are applied on the production branch
+
+name: Pulumi Foundation CI/CD
+
+on:
+  pull_request:
+    branches: [development, nonproduction, production]
+  push:
+    branches: [development, nonproduction, production]
+
+env:
+  PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+  GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+
+jobs:
+  # =========================================================================
+  # Preview: runs on pull requests to validate changes across all stages
+  # =========================================================================
+  preview:
+    name: "Preview: ${{ matrix.stage }}"
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        stage:
+          - 0-bootstrap
+          - 1-org
+          - 2-environments
+          - 3-networks-svpc
+          - 4-projects
+          - 5-app-infra
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+          cache-dependency-path: "${{ matrix.stage }}/go.sum"
+
+      - uses: pulumi/actions@v5
+        with:
+          command: preview
+          work-dir: ${{ matrix.stage }}
+          stack-name: ${{ github.base_ref }}
+          comment-on-pr: true
+          diff: true
+
+  # =========================================================================
+  # Deploy: runs on merge to environment branches
+  # Stages are deployed sequentially to respect dependencies.
+  # =========================================================================
+  deploy-bootstrap:
+    name: "Deploy: 0-bootstrap"
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+          cache-dependency-path: "0-bootstrap/go.sum"
+      - uses: pulumi/actions@v5
+        with:
+          command: up
+          work-dir: 0-bootstrap
+          stack-name: ${{ github.ref_name }}
+
+  deploy-org:
+    name: "Deploy: 1-org"
+    if: github.event_name == 'push'
+    needs: deploy-bootstrap
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+          cache-dependency-path: "1-org/go.sum"
+      - uses: pulumi/actions@v5
+        with:
+          command: up
+          work-dir: 1-org
+          stack-name: ${{ github.ref_name }}
+
+  deploy-environments:
+    name: "Deploy: 2-environments"
+    if: github.event_name == 'push'
+    needs: deploy-org
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+          cache-dependency-path: "2-environments/go.sum"
+      - uses: pulumi/actions@v5
+        with:
+          command: up
+          work-dir: 2-environments
+          stack-name: ${{ github.ref_name }}
+
+  deploy-networks:
+    name: "Deploy: 3-networks-svpc"
+    if: github.event_name == 'push'
+    needs: deploy-environments
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+          cache-dependency-path: "3-networks-svpc/go.sum"
+      - uses: pulumi/actions@v5
+        with:
+          command: up
+          work-dir: 3-networks-svpc
+          stack-name: ${{ github.ref_name }}
+
+  deploy-projects:
+    name: "Deploy: 4-projects"
+    if: github.event_name == 'push'
+    needs: deploy-networks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+          cache-dependency-path: "4-projects/go.sum"
+      - uses: pulumi/actions@v5
+        with:
+          command: up
+          work-dir: 4-projects
+          stack-name: ${{ github.ref_name }}
+
+  deploy-app-infra:
+    name: "Deploy: 5-app-infra"
+    if: github.event_name == 'push'
+    needs: deploy-projects
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+          cache-dependency-path: "5-app-infra/go.sum"
+      - uses: pulumi/actions@v5
+        with:
+          command: up
+          work-dir: 5-app-infra
+          stack-name: ${{ github.ref_name }}

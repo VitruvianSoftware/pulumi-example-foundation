@@ -17,6 +17,9 @@
 package main
 
 import (
+	"fmt"
+
+	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/organizations"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi/config"
 )
@@ -25,46 +28,92 @@ func main() {
 	pulumi.Run(func(ctx *pulumi.Context) error {
 		cfg := loadProjectsConfig(ctx)
 
-		// 1. Stack Reference to Environment
-		envStack, err := pulumi.NewStackReference(ctx, "environment", &pulumi.StackReferenceArgs{
-			Name: pulumi.String(cfg.EnvStackName),
+		// 1. Stack References to resolve folder and network project IDs
+		orgStack, err := pulumi.NewStackReference(ctx, "organization", &pulumi.StackReferenceArgs{
+			Name: pulumi.String(cfg.OrgStackName),
 		})
 		if err != nil {
 			return err
 		}
 
-		// 2. Resolve Folder ID from stack
-		folderID := envStack.GetOutput(pulumi.String("folder_id")).(pulumi.StringOutput)
+		// 2. Resolve the environment folder from Stage 1 outputs
+		folderID := orgStack.GetStringOutput(pulumi.String(fmt.Sprintf("%s_folder_id", cfg.Env)))
 
-		// 3. Deploy Business Unit Projects
-		projects, err := deployBusinessUnitProjects(ctx, cfg, folderID)
+		// Resolve the SVPC host project for this environment
+		networkProjectID := orgStack.GetStringOutput(pulumi.String(fmt.Sprintf("%s_network_project_id", cfg.Env)))
+
+		// 3. Create the Business Unit folder under the environment folder
+		buFolder, err := organizations.NewFolder(ctx, "bu-folder", &organizations.FolderArgs{
+			DisplayName: folderID.ApplyT(func(_ string) string {
+				return fmt.Sprintf("%s-%s-%s", cfg.FolderPrefix, cfg.Env, cfg.BusinessCode)
+			}).(pulumi.StringOutput),
+			Parent: folderID.ApplyT(func(id string) string {
+				return "folders/" + id
+			}).(pulumi.StringOutput),
+		})
 		if err != nil {
 			return err
 		}
 
-		// 4. Exports
-		ctx.Export("app_project_id", projects.AppProjectID)
-		ctx.Export("data_project_id", projects.DataProjectID)
+		// 4. Deploy Business Unit Projects
+		projects, err := deployBusinessUnitProjects(ctx, cfg, buFolder.ID(), networkProjectID)
+		if err != nil {
+			return err
+		}
+
+		// 5. Deploy Infra Pipeline Project (under common folder)
+		commonFolderID := orgStack.GetStringOutput(pulumi.String("common_folder_id"))
+		infraPipeline, err := deployInfraPipelineProject(ctx, cfg, commonFolderID)
+		if err != nil {
+			return err
+		}
+
+		// 6. Exports
+		ctx.Export("bu_folder_id", buFolder.ID())
+		ctx.Export("svpc_project_id", projects.SVPCProjectID)
+		ctx.Export("floating_project_id", projects.FloatingProjectID)
+		ctx.Export("peering_project_id", projects.PeeringProjectID)
+		ctx.Export("infra_pipeline_project_id", infraPipeline)
+		ctx.Export("network_project_id", networkProjectID)
 
 		return nil
 	})
 }
 
+// ProjectsConfig holds configuration for the projects stage.
 type ProjectsConfig struct {
 	Env            string
+	EnvCode        string
 	BusinessCode   string
 	BillingAccount string
 	ProjectPrefix  string
-	EnvStackName   string
+	FolderPrefix   string
+	OrgStackName   string
 }
 
 func loadProjectsConfig(ctx *pulumi.Context) *ProjectsConfig {
 	conf := config.New(ctx, "")
-	return &ProjectsConfig{
+	c := &ProjectsConfig{
 		Env:            conf.Require("env"),
 		BusinessCode:   conf.Require("business_code"),
 		BillingAccount: conf.Require("billing_account"),
 		ProjectPrefix:  conf.Get("project_prefix"),
-		EnvStackName:   conf.Require("env_stack_name"),
+		FolderPrefix:   conf.Get("folder_prefix"),
+		OrgStackName:   conf.Require("org_stack_name"),
 	}
+	if c.ProjectPrefix == "" {
+		c.ProjectPrefix = "prj"
+	}
+	if c.FolderPrefix == "" {
+		c.FolderPrefix = "fldr"
+	}
+
+	// Derive env code (d/n/p) from environment name
+	envCodes := map[string]string{"development": "d", "nonproduction": "n", "production": "p"}
+	c.EnvCode = envCodes[c.Env]
+	if c.EnvCode == "" {
+		c.EnvCode = c.Env[:1]
+	}
+
+	return c
 }
