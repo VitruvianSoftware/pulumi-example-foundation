@@ -147,7 +147,7 @@ See [troubleshooting](../docs/TROUBLESHOOTING.md) if you run into issues during 
 
 ## Deploying with GitHub Actions
 
-This is the recommended CI/CD approach for the Pulumi foundation. After the initial bootstrap is applied manually, all subsequent changes are deployed via the GitHub Actions pipeline defined in [`.github/workflows/pulumi-ci.yml`](../.github/workflows/pulumi-ci.yml).
+This is the recommended CI/CD approach for the Pulumi foundation. After the initial bootstrap is applied manually, all subsequent changes are deployed via a GitHub Actions pipeline. The pipeline template is provided in [`build/pulumi-ci.yml`](../build/pulumi-ci.yml) and must be copied into your repository's `.github/workflows/` directory during onboarding.
 
 ### Requirements for GitHub Actions
 

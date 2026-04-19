@@ -110,7 +110,7 @@ example-organization
 
 ## Branching Strategy
 
-The CI/CD pipeline (`.github/workflows/pulumi-ci.yml`) uses a trunk-based development model. The branching model varies by stage:
+The deployment pipeline (`build/pulumi-ci.yml`) uses a trunk-based development model and is copied into the operator's repository during onboarding (see [ONBOARDING.md](./ONBOARDING.md)). The branching model varies by stage:
 
 | Stage | Branches | Rationale |
 |-------|----------|-----------|

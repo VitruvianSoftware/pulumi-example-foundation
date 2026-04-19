@@ -1,0 +1,96 @@
+# Copyright 2026 Vitruvian Software
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Repository CI — validates the reference foundation codebase itself.
+#
+# This is NOT the deployment pipeline. The deployment pipeline templates
+# (pulumi preview/up against environment branches) live in build/ and
+# are copied into the operator's repositories during onboarding.
+# See ONBOARDING.md for details.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: '${{ github.workflow }}-${{ github.head_ref || github.ref }}'
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: "Build: ${{ matrix.stage }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        stage:
+          - 0-bootstrap
+          - 1-org
+          - 2-environments
+          - 3-networks-hub-and-spoke
+          - 3-networks-svpc
+          - 4-projects
+          - 5-app-infra
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ matrix.stage }}/go.mod
+          cache-dependency-path: ${{ matrix.stage }}/go.sum
+
+      - name: Tidy
+        working-directory: ${{ matrix.stage }}
+        run: go mod tidy && git diff --exit-code
+
+      - name: Vet
+        working-directory: ${{ matrix.stage }}
+        run: go vet ./...
+
+      - name: Build
+        working-directory: ${{ matrix.stage }}
+        run: go build ./...
+
+  commitlint:
+    name: Commit Lint
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - name: Install commitlint
+        run: |
+          npm install -D @commitlint/cli @commitlint/config-conventional
+          echo "module.exports = { extends: ['@commitlint/config-conventional'], rules: {'subject-case': [0], 'header-max-length': [0]} };" > commitlint.config.js
+
+      - name: Validate PR title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: 'echo "$TITLE" | npx commitlint --verbose'

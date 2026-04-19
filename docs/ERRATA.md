@@ -15,8 +15,9 @@ can evaluate whether they affect their deployment and plan accordingly.
 - Jenkins
 - Terraform Cloud / Terraform Enterprise
 
-**This port:** Supports **GitHub Actions only**. The pipeline is defined in
-`.github/workflows/pulumi-ci.yml`. There are no equivalent `README-Jenkins.md`,
+**This port:** Supports **GitHub Actions only**. The deployment pipeline template
+is provided in `build/pulumi-ci.yml` and is copied to the operator's repository
+during onboarding. There are no equivalent `README-Jenkins.md`,
 `README-GitLab.md`, or `README-Terraform-Cloud.md` files.
 
 ## Policy Validation
