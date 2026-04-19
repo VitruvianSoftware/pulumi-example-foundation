@@ -1,0 +1,195 @@
+// Copyright 2026 Vitruvian Software
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// ============================================================================
+// GitLab CI/CD Provider — Example
+// ============================================================================
+//
+// This file is an EXAMPLE showing how to replace the default GitHub Actions
+// CI/CD provider with GitLab CI/CD using Workload Identity Federation.
+// This mirrors the Terraform foundation's `build_gitlab.tf.example`.
+//
+// To use GitLab instead of GitHub Actions:
+//
+// 1. Rename this file: build_gitlab.go.example → build_gitlab.go
+// 2. Remove or rename: build_github_actions.go → build_github_actions.go.bak
+// 3. Update main.go:
+//    a. Replace the build call (see below)
+//    b. Replace the GitHub config fields with GitLab equivalents
+//    c. Update the WIF output exports
+// 4. Add the required config values to your Pulumi.<stack>.yaml
+// 5. Run `pulumi up` to provision the GitLab WIF infrastructure.
+//
+// ============================================================================
+// WHAT THIS CREATES:
+//
+// 1. Workload Identity Pool — "foundation-pool"
+// 2. Workload Identity Pool OIDC Provider — "foundation-gl-provider"
+//    (issuer: https://gitlab.com)
+// 3. SA → WIF attribute bindings — per-SA project_path mappings
+// 4. Bootstrap SA gets workloadIdentityPoolAdmin on CI/CD project
+// ============================================================================
+
+package main
+
+import (
+	"fmt"
+
+	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/iam"
+	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/serviceaccount"
+	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
+)
+
+// GitLabBuildOutputs holds the outputs from GitLab WIF provisioning.
+type GitLabBuildOutputs struct {
+	WIFPoolName     pulumi.StringOutput
+	WIFProviderName pulumi.StringOutput
+}
+
+// deployGitLabBuild provisions the Workload Identity Federation resources
+// for GitLab CI/CD. This mirrors the Terraform foundation's build_gitlab.tf.
+//
+// To use this function, update main.go:
+//
+//	// Replace:
+//	buildOutputs, err := deployGitHubActionsBuild(ctx, cfg, cicd, sas)
+//	// With:
+//	buildOutputs, err := deployGitLabBuild(ctx, cfg, cicd, sas)
+//
+// And add these config fields to the Config struct:
+//
+//	GitLabOwner       string  // GitLab group/user (e.g. "my-org")
+//	GitLabRepoBootstrap string
+//	GitLabRepoOrg       string
+//	GitLabRepoEnv       string
+//	GitLabRepoNet       string
+//	GitLabRepoProj      string
+//	GitLabRepoCICDRunner string  // Repository for CI/CD runner Docker image
+func deployGitLabBuild(ctx *pulumi.Context, cfg *Config, cicd *CICDProject, sas map[string]*serviceaccount.Account) (*GitLabBuildOutputs, error) {
+	outputs := &GitLabBuildOutputs{}
+
+	// GitLab owner must be set to enable WIF
+	// (add GitLabOwner to Config struct and loadConfig)
+	gitlabOwner := "" // Replace with: cfg.GitLabOwner
+	if gitlabOwner == "" {
+		return outputs, nil
+	}
+
+	// ========================================================================
+	// 1. Workload Identity Pool
+	// ========================================================================
+	pool, err := iam.NewWorkloadIdentityPool(ctx, "foundation-wif-pool", &iam.WorkloadIdentityPoolArgs{
+		Project:                cicd.ProjectID,
+		WorkloadIdentityPoolId: pulumi.String("foundation-pool"),
+		DisplayName:            pulumi.String("Foundation CI/CD Pool"),
+		Description:            pulumi.String("Workload Identity Pool for GitLab CI/CD pipeline. Managed by Pulumi."),
+		Disabled:               pulumi.Bool(false),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// ========================================================================
+	// 2. Workload Identity Pool OIDC Provider (GitLab)
+	// GitLab uses a different OIDC issuer and attribute mapping than GitHub:
+	//   - Issuer: https://gitlab.com (or self-hosted URL)
+	//   - Key attribute: project_path (e.g. "my-org/my-repo")
+	// ========================================================================
+	provider, err := iam.NewWorkloadIdentityPoolProvider(ctx, "foundation-wif-gl-provider", &iam.WorkloadIdentityPoolProviderArgs{
+		Project:                        cicd.ProjectID,
+		WorkloadIdentityPoolId:         pool.WorkloadIdentityPoolId,
+		WorkloadIdentityPoolProviderId: pulumi.String("foundation-gl-provider"),
+		DisplayName:                    pulumi.String("Foundation GitLab Provider"),
+		Description:                    pulumi.String("GitLab CI/CD OIDC provider for foundation pipelines. Managed by Pulumi."),
+		// Restrict to projects under the configured GitLab owner/group
+		AttributeCondition: pulumi.Sprintf("assertion.project_path.startsWith('%s/')", gitlabOwner),
+		AttributeMapping: pulumi.StringMap{
+			"google.subject":         pulumi.String("assertion.sub"),
+			"attribute.project_path": pulumi.String("assertion.project_path"),
+			"attribute.project_id":   pulumi.String("assertion.project_id"),
+			"attribute.namespace_id": pulumi.String("assertion.namespace_id"),
+			"attribute.ref":          pulumi.String("assertion.ref"),
+		},
+		Oidc: &iam.WorkloadIdentityPoolProviderOidcArgs{
+			// For self-hosted GitLab, change to your instance URL
+			IssuerUri: pulumi.String("https://gitlab.com"),
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// ========================================================================
+	// 3. SA → WIF Attribute Bindings
+	// Map each granular SA to a specific GitLab project via project_path.
+	// ========================================================================
+
+	// Map stage keys to their GitLab repo names
+	// (add these fields to Config struct and loadConfig)
+	stageRepos := map[string]string{
+		"bootstrap": "", // Replace with: cfg.GitLabRepoBootstrap
+		"org":       "", // Replace with: cfg.GitLabRepoOrg
+		"env":       "", // Replace with: cfg.GitLabRepoEnv
+		"net":       "", // Replace with: cfg.GitLabRepoNet
+		"proj":      "", // Replace with: cfg.GitLabRepoProj
+	}
+
+	for key, sa := range sas {
+		repo := stageRepos[key]
+		if repo == "" {
+			continue
+		}
+
+		member := pulumi.Sprintf(
+			"principalSet://iam.googleapis.com/%s/attribute.project_path/%s/%s",
+			pool.Name, gitlabOwner, repo,
+		)
+
+		_, err := serviceaccount.NewIAMMember(ctx, fmt.Sprintf("wif-sa-binding-%s", key), &serviceaccount.IAMMemberArgs{
+			ServiceAccountId: sa.Name,
+			Role:             pulumi.String("roles/iam.workloadIdentityUser"),
+			Member:           member,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// ========================================================================
+	// 4. Bootstrap SA: WIF Pool Admin on CI/CD project
+	// The bootstrap SA needs workloadIdentityPoolAdmin to manage the WIF
+	// pool during subsequent updates.
+	// ========================================================================
+	bootstrapSA := sas["bootstrap"]
+	if bootstrapSA != nil {
+		_, err := serviceaccount.NewIAMMember(ctx, "bootstrap-wif-pool-admin", &serviceaccount.IAMMemberArgs{
+			ServiceAccountId: bootstrapSA.Name,
+			Role:             pulumi.String("roles/iam.workloadIdentityPoolAdmin"),
+			Member: bootstrapSA.Email.ApplyT(func(email string) string {
+				return fmt.Sprintf("serviceAccount:%s", email)
+			}).(pulumi.StringOutput),
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// ========================================================================
+	// 5. Outputs
+	// ========================================================================
+	outputs.WIFPoolName = pool.Name
+	outputs.WIFProviderName = provider.Name
+
+	return outputs, nil
+}

@@ -268,5 +268,108 @@ func deployIAM(ctx *pulumi.Context, cfg *Config, seed *SeedProject, cicd *CICDPr
 		return nil, err
 	}
 
+	// ========================================================================
+	// 7. Org Admins Group IAM
+	// Grant the org admins group essential org-level roles. This mirrors
+	// the Terraform bootstrap module's org_admins_org_iam_permissions which
+	// grants organizationAdmin + billing.user (and optionally
+	// orgpolicy.policyAdmin) to the group_org_admins group.
+	// ========================================================================
+	orgAdminGroupMember := pulumi.Sprintf("group:%s", cfg.GroupOrgAdmins)
+	orgAdminRoles := []string{
+		"roles/resourcemanager.organizationAdmin",
+		"roles/billing.user",
+	}
+	if cfg.OrgPolicyAdminRole {
+		orgAdminRoles = append(orgAdminRoles, "roles/orgpolicy.policyAdmin")
+	}
+	for _, role := range orgAdminRoles {
+		if _, err := iam.NewIAMMember(ctx, fmt.Sprintf("org-admins-%s", roleID(role)), &iam.IAMMemberArgs{
+			ParentID:   pulumi.String(cfg.OrgID),
+			ParentType: "organization",
+			Role:       pulumi.String(role),
+			Member:     orgAdminGroupMember,
+		}); err != nil {
+			return nil, err
+		}
+	}
+
+	// ========================================================================
+	// 8. SA Self-Impersonation
+	// Each granular SA gets roles/iam.serviceAccountTokenCreator on itself.
+	// This is required for Workload Identity Federation flows where the SA
+	// needs to mint its own tokens. Mirrors the Terraform foundation's
+	// build_github.tf self_impersonate resource.
+	// ========================================================================
+	for key, sa := range sas {
+		if _, err := iam.NewIAMMember(ctx, fmt.Sprintf("sa-self-impersonate-%s", key), &iam.IAMMemberArgs{
+			ParentID:   sa.Name,
+			ParentType: "serviceAccount",
+			Role:       pulumi.String("roles/iam.serviceAccountTokenCreator"),
+			Member:     memberOf(sa),
+		}); err != nil {
+			return nil, err
+		}
+	}
+
+	// Grant org admins group the ability to impersonate all granular SAs.
+	// This allows org admins to assume any pipeline SA identity for
+	// local development and troubleshooting.
+	for key, sa := range sas {
+		if _, err := iam.NewIAMMember(ctx, fmt.Sprintf("org-admins-impersonate-%s", key), &iam.IAMMemberArgs{
+			ParentID:   sa.Name,
+			ParentType: "serviceAccount",
+			Role:       pulumi.String("roles/iam.serviceAccountTokenCreator"),
+			Member:     orgAdminGroupMember,
+		}); err != nil {
+			return nil, err
+		}
+	}
+
+	// ========================================================================
+	// 9. Org Project Creators Enforcement
+	// Restrict the Project Creator role at the org/parent level to ONLY the
+	// granular service accounts. This is authoritative — it removes any other
+	// members from this role. Mirrors the Terraform foundation's
+	// org_project_creators enforcement in the bootstrap module.
+	// ========================================================================
+	saMembers := make(pulumi.StringArray, 0, len(granularSAs))
+	for _, sa := range sas {
+		saMembers = append(saMembers, memberOf(sa))
+	}
+	// Also include the org admins group so they retain the ability to create projects
+	saMembers = append(saMembers, pulumi.Sprintf("group:%s", cfg.GroupOrgAdmins))
+
+	if _, err := iam.NewIAMBinding(ctx, "org-project-creators", &iam.IAMBindingArgs{
+		ParentID:   pulumi.String(cfg.ParentID),
+		ParentType: cfg.ParentType,
+		Role:       pulumi.String("roles/resourcemanager.projectCreator"),
+		Members:    saMembers,
+	}); err != nil {
+		return nil, err
+	}
+
+	// ========================================================================
+	// 10. Remove roles/editor from bootstrap projects
+	// When projects are created, the Compute Engine default SA gets the
+	// Editor role. This removes all editors from both projects to follow
+	// least-privilege. Mirrors the Terraform foundation's
+	// bootstrap_projects_remove_editor module.
+	// ========================================================================
+	bootstrapProjects := map[string]pulumi.StringOutput{
+		"seed": seed.ProjectID,
+		"cicd": cicd.ProjectID,
+	}
+	for projKey, projID := range bootstrapProjects {
+		if _, err := iam.NewIAMBinding(ctx, fmt.Sprintf("remove-editor-%s", projKey), &iam.IAMBindingArgs{
+			ParentID:   projID,
+			ParentType: "project",
+			Role:       pulumi.String("roles/editor"),
+			Members:    pulumi.StringArray{}, // empty = remove all editors
+		}); err != nil {
+			return nil, err
+		}
+	}
+
 	return sas, nil
 }

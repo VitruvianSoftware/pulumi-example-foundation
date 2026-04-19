@@ -17,7 +17,7 @@ This foundation is designed to be modular and deployed in stages. Each stage bui
 
 ## Step 0: Bootstrap
 
-**Purpose**: Create the Seed project (state storage, KMS encryption, service accounts) and CI/CD project.
+**Purpose**: Create the Seed project (state storage, KMS encryption, service accounts) and CI/CD project with Workload Identity Federation.
 
 ```bash
 cd 0-bootstrap
@@ -28,13 +28,35 @@ pulumi config set group_org_admins "org-admins@example.com"
 pulumi config set group_billing_admins "billing-admins@example.com"
 pulumi config set billing_data_users "billing-data@example.com"
 pulumi config set audit_data_users "audit-data@example.com"
+
+# Optional: governance groups (consumed by 1-org for IAM bindings)
+pulumi config set gcp_security_reviewer "security-reviewers@example.com"
+pulumi config set gcp_network_viewer "network-viewers@example.com"
+pulumi config set gcp_scc_admin "scc-admins@example.com"
+pulumi config set gcp_global_secrets_admin "secrets-admins@example.com"
+pulumi config set gcp_kms_admin "kms-admins@example.com"
+
+# Recommended: Enable Workload Identity Federation for GitHub Actions
+pulumi config set github_owner "your-github-org"
+pulumi config set github_repo_bootstrap "pulumi-foundation-bootstrap"
+pulumi config set github_repo_org "pulumi-foundation-org"
+pulumi config set github_repo_env "pulumi-foundation-environments"
+pulumi config set github_repo_net "pulumi-foundation-networks"
+pulumi config set github_repo_proj "pulumi-foundation-projects"
+
 pulumi up
 ```
 
 **Key decisions**:
 - `project_prefix` (default: `prj`) — prefix for all project IDs
 - `folder_prefix` (default: `fldr`) — prefix for all folder names
+- `default_region_kms` (default: `us`) — multi-region location for KMS keys
 - `parent_folder` (optional) — deploy under a specific folder instead of org root
+
+**CI/CD provider**: The default is GitHub Actions with WIF. For Cloud Build, see [0-bootstrap/README-CloudBuild.md](0-bootstrap/README-CloudBuild.md).
+
+**Key output**: The bootstrap exports a `common_config` object containing org_id, billing_account, regions, and prefixes. Downstream stages consume this via [Stack References](docs/GLOSSARY.md#pulumi-stack-reference) instead of re-requiring these values.
+
 
 ## Step 1: Organization
 

@@ -50,6 +50,14 @@ func deploySeedProject(ctx *pulumi.Context, cfg *Config, folderID pulumi.StringO
 		FolderID:        folderID,
 		BillingAccount:  pulumi.String(cfg.BillingAccount),
 		RandomProjectID: cfg.RandomSuffix,
+		DeletionPolicy:  pulumi.String("PREVENT"),
+		Labels: pulumi.StringMap{
+			"environment":      pulumi.String("bootstrap"),
+			"application_name": pulumi.String("seed-bootstrap"),
+			"business_code":    pulumi.String("shared"),
+			"env_code":         pulumi.String("b"),
+			"vpc":              pulumi.String("none"),
+		},
 		ActivateApis: []string{
 			"serviceusage.googleapis.com",
 			"servicenetworking.googleapis.com",
@@ -73,7 +81,7 @@ func deploySeedProject(ctx *pulumi.Context, cfg *Config, folderID pulumi.StringO
 			"assuredworkloads.googleapis.com",
 			"cloudasset.googleapis.com",
 		},
-	})
+	}, pulumi.Protect(true))
 	if err != nil {
 		return nil, err
 	}
@@ -83,8 +91,8 @@ func deploySeedProject(ctx *pulumi.Context, cfg *Config, folderID pulumi.StringO
 	keyRing, err := kms.NewKeyRing(ctx, "state-bucket-keyring", &kms.KeyRingArgs{
 		Project:  seed.Project.ProjectId,
 		Name:     pulumi.String(fmt.Sprintf("%s-keyring", cfg.ProjectPrefix)),
-		Location: pulumi.String(cfg.DefaultRegion),
-	})
+		Location: pulumi.String(cfg.DefaultRegionKMS),
+	}, pulumi.Protect(true))
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +101,11 @@ func deploySeedProject(ctx *pulumi.Context, cfg *Config, folderID pulumi.StringO
 		Name:           pulumi.String(fmt.Sprintf("%s-key", cfg.ProjectPrefix)),
 		KeyRing:        keyRing.ID(),
 		RotationPeriod: pulumi.String("7776000s"), // 90 days
-	})
+		VersionTemplate: &kms.CryptoKeyVersionTemplateArgs{
+			ProtectionLevel: pulumi.String(cfg.KMSKeyProtectionLevel),
+			Algorithm:       pulumi.String("GOOGLE_SYMMETRIC_ENCRYPTION"),
+		},
+	}, pulumi.Protect(true))
 	if err != nil {
 		return nil, err
 	}
@@ -153,6 +165,14 @@ func deployCICDProject(ctx *pulumi.Context, cfg *Config, folderID pulumi.StringO
 		FolderID:        folderID,
 		BillingAccount:  pulumi.String(cfg.BillingAccount),
 		RandomProjectID: cfg.RandomSuffix,
+		DeletionPolicy:  pulumi.String("PREVENT"),
+		Labels: pulumi.StringMap{
+			"environment":      pulumi.String("bootstrap"),
+			"application_name": pulumi.String("seed-cicd"),
+			"business_code":    pulumi.String("shared"),
+			"env_code":         pulumi.String("b"),
+			"vpc":              pulumi.String("none"),
+		},
 		ActivateApis: []string{
 			"serviceusage.googleapis.com",
 			"servicenetworking.googleapis.com",
@@ -171,7 +191,7 @@ func deployCICDProject(ctx *pulumi.Context, cfg *Config, folderID pulumi.StringO
 			"workflows.googleapis.com",
 			"cloudscheduler.googleapis.com",
 		},
-	})
+	}, pulumi.Protect(true))
 	if err != nil {
 		return nil, err
 	}
