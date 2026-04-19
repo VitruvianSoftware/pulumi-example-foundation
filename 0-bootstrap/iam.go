@@ -22,6 +22,7 @@ import (
 
 	"github.com/VitruvianSoftware/pulumi-library/pkg/iam"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/serviceaccount"
+	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/storage"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )
 
@@ -315,6 +316,7 @@ func deployIAM(ctx *pulumi.Context, cfg *Config, seed *SeedProject, cicd *CICDPr
 	// Grant org admins group the ability to impersonate all granular SAs.
 	// This allows org admins to assume any pipeline SA identity for
 	// local development and troubleshooting.
+	// Mirrors: org_admin_sa_impersonate_permissions + org_admin_sa_user in TF
 	for key, sa := range sas {
 		if _, err := iam.NewIAMMember(ctx, fmt.Sprintf("org-admins-impersonate-%s", key), &iam.IAMMemberArgs{
 			ParentID:   sa.Name,
@@ -324,6 +326,28 @@ func deployIAM(ctx *pulumi.Context, cfg *Config, seed *SeedProject, cicd *CICDPr
 		}); err != nil {
 			return nil, err
 		}
+		// roles/iam.serviceAccountUser allows the admins to "act as" the SA
+		// (not just mint tokens). Required for full impersonation workflows.
+		if _, err := iam.NewIAMMember(ctx, fmt.Sprintf("org-admins-sa-user-%s", key), &iam.IAMMemberArgs{
+			ParentID:   sa.Name,
+			ParentType: "serviceAccount",
+			Role:       pulumi.String("roles/iam.serviceAccountUser"),
+			Member:     orgAdminGroupMember,
+		}); err != nil {
+			return nil, err
+		}
+	}
+
+	// Grant org admins serviceusage.serviceUsageConsumer at the parent level
+	// so they can consume API quota while impersonating pipeline SAs.
+	// Mirrors: org_admin_serviceusage_consumer in TF bootstrap
+	if _, err := iam.NewIAMMember(ctx, "org-admins-serviceusage", &iam.IAMMemberArgs{
+		ParentID:   pulumi.String(cfg.ParentID),
+		ParentType: cfg.ParentType,
+		Role:       pulumi.String("roles/serviceusage.serviceUsageConsumer"),
+		Member:     orgAdminGroupMember,
+	}); err != nil {
+		return nil, err
 	}
 
 	// ========================================================================
@@ -350,7 +374,25 @@ func deployIAM(ctx *pulumi.Context, cfg *Config, seed *SeedProject, cicd *CICDPr
 	}
 
 	// ========================================================================
-	// 10. Remove roles/editor from bootstrap projects
+	// 10. Authoritative billing.creator Enforcement
+	// Restricts roles/billing.creator at the org level to ONLY the billing
+	// admins group. This prevents any other principal from creating new
+	// billing accounts. Mirrors: google_organization_iam_binding
+	// "billing_creator" in TF bootstrap main.tf.
+	// ========================================================================
+	if _, err := iam.NewIAMBinding(ctx, "org-billing-creator", &iam.IAMBindingArgs{
+		ParentID:   pulumi.String(cfg.OrgID),
+		ParentType: "organization",
+		Role:       pulumi.String("roles/billing.creator"),
+		Members: pulumi.StringArray{
+			pulumi.Sprintf("group:%s", cfg.GroupBillingAdmins),
+		},
+	}); err != nil {
+		return nil, err
+	}
+
+	// ========================================================================
+	// 11. Remove roles/editor from bootstrap projects
 	// When projects are created, the Compute Engine default SA gets the
 	// Editor role. This removes all editors from both projects to follow
 	// least-privilege. Mirrors the Terraform foundation's
@@ -366,6 +408,30 @@ func deployIAM(ctx *pulumi.Context, cfg *Config, seed *SeedProject, cicd *CICDPr
 			ParentType: "project",
 			Role:       pulumi.String("roles/editor"),
 			Members:    pulumi.StringArray{}, // empty = remove all editors
+		}); err != nil {
+			return nil, err
+		}
+	}
+
+	// ========================================================================
+	// 12. State Bucket IAM
+	// Grant each pipeline SA + org admins group roles/storage.admin on the
+	// state bucket. This is done here (not in pkg/bootstrap) because the SAs
+	// don't exist yet when the seed project is created.
+	// Mirrors: google_storage_bucket_iam_member "org_terraform_state_iam"
+	// and "orgadmins_state_iam" in TF bootstrap main.tf.
+	// ========================================================================
+	bucketIAMMembers := make([]pulumi.StringInput, 0, len(sas)+1)
+	for _, sa := range sas {
+		bucketIAMMembers = append(bucketIAMMembers, memberOf(sa))
+	}
+	bucketIAMMembers = append(bucketIAMMembers, orgAdminGroupMember)
+
+	for i, member := range bucketIAMMembers {
+		if _, err := storage.NewBucketIAMMember(ctx, fmt.Sprintf("state-bucket-iam-%d", i), &storage.BucketIAMMemberArgs{
+			Bucket: seed.StateBucketName,
+			Role:   pulumi.String("roles/storage.admin"),
+			Member: member,
 		}); err != nil {
 			return nil, err
 		}
