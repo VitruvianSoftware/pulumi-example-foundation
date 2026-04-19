@@ -56,7 +56,10 @@ func main() {
 		}
 
 		// 4. Deploy Business Unit Projects
-		projects, err := deployBusinessUnitProjects(ctx, cfg, buFolder.ID(), networkProjectID)
+		buFolderID := buFolder.ID().ApplyT(func(id pulumi.ID) string {
+			return string(id)
+		}).(pulumi.StringOutput)
+		projects, err := deployBusinessUnitProjects(ctx, cfg, buFolderID, networkProjectID)
 		if err != nil {
 			return err
 		}
@@ -89,6 +92,7 @@ type ProjectsConfig struct {
 	ProjectPrefix  string
 	FolderPrefix   string
 	OrgStackName   string
+	RandomSuffix   bool
 }
 
 func loadProjectsConfig(ctx *pulumi.Context) *ProjectsConfig {
@@ -114,6 +118,9 @@ func loadProjectsConfig(ctx *pulumi.Context) *ProjectsConfig {
 	if c.EnvCode == "" {
 		c.EnvCode = c.Env[:1]
 	}
+
+	randomSuffix := conf.Get("random_suffix")
+	c.RandomSuffix = randomSuffix != "false"
 
 	return c
 }

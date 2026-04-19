@@ -46,10 +46,11 @@ func main() {
 
 			// KMS Project — environment-level key management
 			kmsProject, err := project.NewProject(ctx, fmt.Sprintf("env-kms-%s", env), &project.ProjectArgs{
-				ProjectID:      pulumi.String(fmt.Sprintf("%s-%s-kms", cfg.ProjectPrefix, code)),
-				Name:           pulumi.String(fmt.Sprintf("%s-%s-kms", cfg.ProjectPrefix, code)),
-				FolderID:       folderID,
-				BillingAccount: pulumi.String(cfg.BillingAccount),
+				ProjectID:       pulumi.String(fmt.Sprintf("%s-%s-kms", cfg.ProjectPrefix, code)),
+				Name:            pulumi.String(fmt.Sprintf("%s-%s-kms", cfg.ProjectPrefix, code)),
+				FolderID:        folderID,
+				BillingAccount:  pulumi.String(cfg.BillingAccount),
+				RandomProjectID: cfg.RandomSuffix,
 				ActivateApis: []string{
 					"cloudkms.googleapis.com",
 					"billingbudgets.googleapis.com",
@@ -61,10 +62,11 @@ func main() {
 
 			// Secrets Project — environment-level secret storage
 			secretsProject, err := project.NewProject(ctx, fmt.Sprintf("env-secrets-%s", env), &project.ProjectArgs{
-				ProjectID:      pulumi.String(fmt.Sprintf("%s-%s-secrets", cfg.ProjectPrefix, code)),
-				Name:           pulumi.String(fmt.Sprintf("%s-%s-secrets", cfg.ProjectPrefix, code)),
-				FolderID:       folderID,
-				BillingAccount: pulumi.String(cfg.BillingAccount),
+				ProjectID:       pulumi.String(fmt.Sprintf("%s-%s-secrets", cfg.ProjectPrefix, code)),
+				Name:            pulumi.String(fmt.Sprintf("%s-%s-secrets", cfg.ProjectPrefix, code)),
+				FolderID:        folderID,
+				BillingAccount:  pulumi.String(cfg.BillingAccount),
+				RandomProjectID: cfg.RandomSuffix,
 				ActivateApis: []string{
 					"secretmanager.googleapis.com",
 					"billingbudgets.googleapis.com",
@@ -90,6 +92,7 @@ type EnvConfig struct {
 	BillingAccount string
 	ProjectPrefix  string
 	OrgStackName   string
+	RandomSuffix   bool
 }
 
 func loadEnvConfig(ctx *pulumi.Context) *EnvConfig {
@@ -103,5 +106,7 @@ func loadEnvConfig(ctx *pulumi.Context) *EnvConfig {
 	if c.ProjectPrefix == "" {
 		c.ProjectPrefix = "prj"
 	}
+	randomSuffix := conf.Get("random_suffix")
+	c.RandomSuffix = randomSuffix != "false"
 	return c
 }

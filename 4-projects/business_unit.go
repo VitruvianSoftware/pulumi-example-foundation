@@ -52,11 +52,12 @@ func deployBusinessUnitProjects(ctx *pulumi.Context, cfg *ProjectsConfig, folder
 	// Shared VPC host, enabling shared network resource access.
 	// ========================================================================
 	svpcProject, err := project.NewProject(ctx, "bu-svpc-project", &project.ProjectArgs{
-		ProjectID:      pulumi.String(fmt.Sprintf("%s-%s-%s-sample-svpc", cfg.ProjectPrefix, cfg.EnvCode, cfg.BusinessCode)),
-		Name:           pulumi.String(fmt.Sprintf("%s-%s-%s-sample-svpc", cfg.ProjectPrefix, cfg.EnvCode, cfg.BusinessCode)),
-		FolderID:       folderID,
-		BillingAccount: pulumi.String(cfg.BillingAccount),
-		ActivateApis:   standardAPIs,
+		ProjectID:       pulumi.String(fmt.Sprintf("%s-%s-%s-sample-svpc", cfg.ProjectPrefix, cfg.EnvCode, cfg.BusinessCode)),
+		Name:            pulumi.String(fmt.Sprintf("%s-%s-%s-sample-svpc", cfg.ProjectPrefix, cfg.EnvCode, cfg.BusinessCode)),
+		FolderID:        folderID,
+		BillingAccount:  pulumi.String(cfg.BillingAccount),
+		RandomProjectID: cfg.RandomSuffix,
+		ActivateApis:    standardAPIs,
 	})
 	if err != nil {
 		return nil, err
@@ -74,11 +75,12 @@ func deployBusinessUnitProjects(ctx *pulumi.Context, cfg *ProjectsConfig, folder
 	// 2. Floating Project (not attached to any VPC)
 	// ========================================================================
 	floatingProject, err := project.NewProject(ctx, "bu-floating-project", &project.ProjectArgs{
-		ProjectID:      pulumi.String(fmt.Sprintf("%s-%s-%s-sample-floating", cfg.ProjectPrefix, cfg.EnvCode, cfg.BusinessCode)),
-		Name:           pulumi.String(fmt.Sprintf("%s-%s-%s-sample-floating", cfg.ProjectPrefix, cfg.EnvCode, cfg.BusinessCode)),
-		FolderID:       folderID,
-		BillingAccount: pulumi.String(cfg.BillingAccount),
-		ActivateApis:   standardAPIs,
+		ProjectID:       pulumi.String(fmt.Sprintf("%s-%s-%s-sample-floating", cfg.ProjectPrefix, cfg.EnvCode, cfg.BusinessCode)),
+		Name:            pulumi.String(fmt.Sprintf("%s-%s-%s-sample-floating", cfg.ProjectPrefix, cfg.EnvCode, cfg.BusinessCode)),
+		FolderID:        folderID,
+		BillingAccount:  pulumi.String(cfg.BillingAccount),
+		RandomProjectID: cfg.RandomSuffix,
+		ActivateApis:    standardAPIs,
 	})
 	if err != nil {
 		return nil, err
@@ -88,11 +90,12 @@ func deployBusinessUnitProjects(ctx *pulumi.Context, cfg *ProjectsConfig, folder
 	// 3. Peering Project
 	// ========================================================================
 	peeringProject, err := project.NewProject(ctx, "bu-peering-project", &project.ProjectArgs{
-		ProjectID:      pulumi.String(fmt.Sprintf("%s-%s-%s-sample-peering", cfg.ProjectPrefix, cfg.EnvCode, cfg.BusinessCode)),
-		Name:           pulumi.String(fmt.Sprintf("%s-%s-%s-sample-peering", cfg.ProjectPrefix, cfg.EnvCode, cfg.BusinessCode)),
-		FolderID:       folderID,
-		BillingAccount: pulumi.String(cfg.BillingAccount),
-		ActivateApis:   standardAPIs,
+		ProjectID:       pulumi.String(fmt.Sprintf("%s-%s-%s-sample-peering", cfg.ProjectPrefix, cfg.EnvCode, cfg.BusinessCode)),
+		Name:            pulumi.String(fmt.Sprintf("%s-%s-%s-sample-peering", cfg.ProjectPrefix, cfg.EnvCode, cfg.BusinessCode)),
+		FolderID:        folderID,
+		BillingAccount:  pulumi.String(cfg.BillingAccount),
+		RandomProjectID: cfg.RandomSuffix,
+		ActivateApis:    standardAPIs,
 	})
 	if err != nil {
 		return nil, err
@@ -110,10 +113,11 @@ func deployBusinessUnitProjects(ctx *pulumi.Context, cfg *ProjectsConfig, folder
 // application infrastructure (Stage 5).
 func deployInfraPipelineProject(ctx *pulumi.Context, cfg *ProjectsConfig, commonFolderID pulumi.StringOutput) (pulumi.StringOutput, error) {
 	infraProject, err := project.NewProject(ctx, "infra-pipeline-project", &project.ProjectArgs{
-		ProjectID:      pulumi.String(fmt.Sprintf("%s-c-%s-infra-pipeline", cfg.ProjectPrefix, cfg.BusinessCode)),
-		Name:           pulumi.String(fmt.Sprintf("%s-c-%s-infra-pipeline", cfg.ProjectPrefix, cfg.BusinessCode)),
-		FolderID:       commonFolderID,
-		BillingAccount: pulumi.String(cfg.BillingAccount),
+		ProjectID:       pulumi.String(fmt.Sprintf("%s-c-%s-infra-pipeline", cfg.ProjectPrefix, cfg.BusinessCode)),
+		Name:            pulumi.String(fmt.Sprintf("%s-c-%s-infra-pipeline", cfg.ProjectPrefix, cfg.BusinessCode)),
+		FolderID:        commonFolderID,
+		BillingAccount:  pulumi.String(cfg.BillingAccount),
+		RandomProjectID: cfg.RandomSuffix,
 		ActivateApis: []string{
 			"cloudbuild.googleapis.com",
 			"artifactregistry.googleapis.com",

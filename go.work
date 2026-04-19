@@ -1,6 +1,7 @@
-go 1.21
+go 1.26.1
 
 use (
+	../pulumi-library
 	./0-bootstrap
 	./1-org
 	./2-environments
@@ -8,5 +9,4 @@ use (
 	./3-networks-svpc
 	./4-projects
 	./5-app-infra
-	../pulumi-library
 )

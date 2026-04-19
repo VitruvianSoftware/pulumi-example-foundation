@@ -147,7 +147,7 @@ See [troubleshooting](../docs/TROUBLESHOOTING.md) if you run into issues during 
 
 ## Deploying with GitHub Actions
 
-This is the recommended CI/CD approach for the Pulumi foundation. After the initial bootstrap is applied manually, all subsequent changes are deployed via the GitHub Actions pipeline defined in [`.github/workflows/pulumi-ci.yml`](../.github/workflows/pulumi-ci.yml).
+This is the recommended CI/CD approach for the Pulumi foundation. After the initial bootstrap is applied manually, all subsequent changes are deployed via a GitHub Actions pipeline. The pipeline template is provided in [`build/pulumi-ci.yml`](../build/pulumi-ci.yml) and must be copied into your repository's `.github/workflows/` directory during onboarding.
 
 ### Requirements for GitHub Actions
 
@@ -348,6 +348,7 @@ The following steps guide you through deploying without using the CI/CD pipeline
 | `parent_folder` | Numeric folder ID to deploy under instead of org root. | `""` (org root) |
 | `org_policy_admin_role` | Grant additional Org Policy Admin role to admin group. | `"false"` |
 | `bucket_force_destroy` | Allow deletion of state bucket even if it contains objects. | `"false"` |
+| `random_suffix` | Append a random hex suffix to project IDs and bucket names to prevent collisions. Set to `"false"` for deterministic naming. | `"true"` |
 
 ## Outputs
 

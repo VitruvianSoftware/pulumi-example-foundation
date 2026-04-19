@@ -103,6 +103,7 @@ type OrgConfig struct {
 	EssentialContactsDomains         []string
 	SCCNotificationFilter            string
 	CreateAccessContextManagerPolicy bool
+	RandomSuffix                     bool
 }
 
 func loadOrgConfig(ctx *pulumi.Context) *OrgConfig {
@@ -117,6 +118,10 @@ func loadOrgConfig(ctx *pulumi.Context) *OrgConfig {
 		SCCNotificationFilter:            conf.Get("scc_notification_filter"),
 		CreateAccessContextManagerPolicy: conf.Get("create_access_context_manager_policy") == "true",
 	}
+
+	// Random suffix defaults to true, matching upstream Terraform foundation.
+	randomSuffix := conf.Get("random_suffix")
+	c.RandomSuffix = randomSuffix != "false"
 
 	// Parse comma-separated domain lists
 	if domainsStr := conf.Get("domains_to_allow"); domainsStr != "" {

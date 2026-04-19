@@ -36,14 +36,19 @@ func main() {
 			return err
 		}
 
+		// Convert IDOutput to StringOutput for folder ID
+		folderID := bootstrapFolder.ID().ApplyT(func(id pulumi.ID) string {
+			return string(id)
+		}).(pulumi.StringOutput)
+
 		// 3. Deploy the Seed Project (state storage and SA hosting)
-		seed, err := deploySeedProject(ctx, cfg, bootstrapFolder.ID())
+		seed, err := deploySeedProject(ctx, cfg, folderID)
 		if err != nil {
 			return err
 		}
 
 		// 4. Deploy the CI/CD Project (pipeline hosting)
-		cicd, err := deployCICDProject(ctx, cfg, bootstrapFolder.ID())
+		cicd, err := deployCICDProject(ctx, cfg, folderID)
 		if err != nil {
 			return err
 		}
@@ -85,6 +90,7 @@ type Config struct {
 	ParentID         string // The numeric ID for parent-level IAM bindings
 	OrgPolicyAdminRole bool
 	BucketForceDestroy bool
+	RandomSuffix       bool // Append random hex suffix to project IDs (default: true)
 	// Groups — required for org admin and billing workflows
 	GroupOrgAdmins     string
 	GroupBillingAdmins string
@@ -112,6 +118,11 @@ func loadConfig(ctx *pulumi.Context) *Config {
 
 	c.OrgPolicyAdminRole = conf.Get("org_policy_admin_role") == "true"
 	c.BucketForceDestroy = conf.Get("bucket_force_destroy") == "true"
+
+	// Random suffix defaults to true, matching upstream Terraform foundation.
+	// Set to "false" to use deterministic project IDs.
+	randomSuffix := conf.Get("random_suffix")
+	c.RandomSuffix = randomSuffix != "false"
 
 	// Apply defaults matching the Terraform foundation
 	if c.ProjectPrefix == "" {

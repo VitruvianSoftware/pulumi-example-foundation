@@ -121,16 +121,33 @@ pulumi up
 
 ## CI/CD Pipeline
 
-After the initial bootstrap, all subsequent changes are deployed via the GitHub Actions pipeline (`.github/workflows/pulumi-ci.yml`):
+This repository separates **repository CI** from **deployment pipelines**:
 
-1. **Feature branch** → Open PR → `pulumi preview` runs for all stages
-2. **Merge to `development`** → `pulumi up` deploys to development
-3. **Merge to `nonproduction`** → `pulumi up` deploys to non-production
-4. **Merge to `production`** → `pulumi up` deploys to production + shared resources
+- **Repository CI** (`.github/workflows/ci.yml`) validates the reference codebase
+  on PRs to `main` — running `go mod tidy`, `go vet`, and `go build` across all
+  stages. This runs automatically.
 
-### Required GitHub Secrets
-- `PULUMI_ACCESS_TOKEN` — Pulumi Cloud access token
-- `GOOGLE_CREDENTIALS` — GCP service account key JSON
+- **Deployment pipelines** (`build/pulumi-ci.yml`) are templates that you copy
+  into your **own** foundation repository's `.github/workflows/` directory during
+  onboarding. These trigger `pulumi preview` on PRs and `pulumi up` on merges to
+  the environment branches (`development`, `nonproduction`, `production`).
+
+### Setting Up the Deployment Pipeline
+
+1. Copy the deployment pipeline template into your repo:
+   ```bash
+   cp build/pulumi-ci.yml .github/workflows/pulumi-ci.yml
+   ```
+
+2. Configure the required GitHub Secrets:
+   - `PULUMI_ACCESS_TOKEN` — Pulumi Cloud access token
+   - `GOOGLE_CREDENTIALS` — GCP service account key JSON
+
+3. The pipeline flow:
+   1. **Feature branch** → Open PR → `pulumi preview` runs for all stages
+   2. **Merge to `development`** → `pulumi up` deploys to development
+   3. **Merge to `nonproduction`** → `pulumi up` deploys to non-production
+   4. **Merge to `production`** → `pulumi up` deploys to production + shared resources
 
 ## Using the Shared Library
 
