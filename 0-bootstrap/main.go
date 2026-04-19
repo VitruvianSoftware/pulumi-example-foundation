@@ -27,6 +27,13 @@ func main() {
 		// 1. Load Configuration
 		cfg := loadConfig(ctx)
 
+		// 1b. Optionally create Google Workspace groups.
+		// Groups must exist before IAM bindings reference them.
+		// Mirrors: 0-bootstrap/groups.tf in the TF foundation.
+		if err := deployGroups(ctx, cfg); err != nil {
+			return err
+		}
+
 		// 2. Create the Bootstrap Folder
 		bootstrapFolder, err := organizations.NewFolder(ctx, "bootstrap-folder", &organizations.FolderArgs{
 			DisplayName:        pulumi.String(cfg.FolderPrefix + "-bootstrap"),
@@ -153,6 +160,13 @@ type Config struct {
 	GCPGlobalSecretsAdmin  string
 	GCPKMSAdmin            string
 
+	// Group creation — when true, the bootstrap stage creates the groups
+	// via Cloud Identity instead of assuming they pre-exist.
+	// Mirrors: var.groups.create_required_groups / create_optional_groups
+	CreateRequiredGroups bool
+	CreateOptionalGroups bool
+	InitialGroupConfig   string // "WITH_INITIAL_OWNER", "EMPTY", etc.
+
 	// GitHub Actions CI/CD — default CI/CD provider.
 	// Set github_owner to enable Workload Identity Federation.
 	GitHubOwner             string
@@ -200,6 +214,12 @@ func loadConfig(ctx *pulumi.Context) *Config {
 
 	c.OrgPolicyAdminRole = conf.Get("org_policy_admin_role") == "true"
 	c.BucketForceDestroy = conf.Get("bucket_force_destroy") == "true"
+	c.CreateRequiredGroups = conf.Get("create_required_groups") == "true"
+	c.CreateOptionalGroups = conf.Get("create_optional_groups") == "true"
+	c.InitialGroupConfig = conf.Get("initial_group_config")
+	if c.InitialGroupConfig == "" {
+		c.InitialGroupConfig = "WITH_INITIAL_OWNER"
+	}
 
 	// Random suffix defaults to true, matching upstream Terraform foundation.
 	// Set to "false" to use deterministic project IDs.
