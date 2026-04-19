@@ -26,11 +26,20 @@ import (
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )
 
+// LoggingOutputs holds resource references for downstream exports.
+type LoggingOutputs struct {
+	StorageBucketName pulumi.StringOutput
+	PubSubTopicName   pulumi.StringOutput
+}
+
 // deployCentralizedLogging creates the centralized logging infrastructure:
 // org-level sinks that export audit logs to Storage, Pub/Sub, and a Logging
 // project bucket with a linked BigQuery dataset for analytics.
-// This mirrors the Terraform foundation's log_sinks.tf.
-func deployCentralizedLogging(ctx *pulumi.Context, cfg *OrgConfig, auditProjectID, billingExportProjectID pulumi.StringOutput) error {
+// This mirrors the Terraform foundation's log_sinks.tf and centralized-logging module.
+//
+// Critical fix (D15): Grants sink writer identities IAM on destinations so
+// logs are actually delivered instead of failing with 403.
+func deployCentralizedLogging(ctx *pulumi.Context, cfg *OrgConfig, auditProjectID, billingExportProjectID pulumi.StringOutput) (*LoggingOutputs, error) {
 	// Comprehensive log filter covering all audit and network logs
 	logFilter := `logName: /logs/cloudaudit.googleapis.com%2Factivity OR
 logName: /logs/cloudaudit.googleapis.com%2Fsystem_event OR
@@ -46,7 +55,7 @@ logName: /logs/dns.googleapis.com%2Fdns_queries`
 	// Logs are sent to a logging bucket with a linked BigQuery dataset
 	// for ad-hoc investigations, querying, and reporting.
 	// ========================================================================
-	if _, err := logging.NewOrganizationSink(ctx, "org-sink-project", &logging.OrganizationSinkArgs{
+	_, err := logging.NewOrganizationSink(ctx, "org-sink-project", &logging.OrganizationSinkArgs{
 		Name:  pulumi.String("sk-c-logging-prj"),
 		OrgId: pulumi.String(cfg.OrgID),
 		Destination: auditProjectID.ApplyT(func(id string) string {
@@ -54,9 +63,14 @@ logName: /logs/dns.googleapis.com%2Fdns_queries`
 		}).(pulumi.StringOutput),
 		Filter:          pulumi.String(logFilter),
 		IncludeChildren: pulumi.Bool(true),
-	}); err != nil {
-		return err
+	})
+	if err != nil {
+		return nil, err
 	}
+
+	// Note: GCP automatically handles org-level sink writer permissions for
+	// the project destination. The critical IAM grants are on the storage
+	// and Pub/Sub destinations below.
 
 	// ========================================================================
 	// 2. Organization Sink → Cloud Storage (long-term retention)
@@ -73,10 +87,10 @@ logName: /logs/dns.googleapis.com%2Fdns_queries`
 		},
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	if _, err := logging.NewOrganizationSink(ctx, "org-sink-storage", &logging.OrganizationSinkArgs{
+	storageSink, err := logging.NewOrganizationSink(ctx, "org-sink-storage", &logging.OrganizationSinkArgs{
 		Name:  pulumi.String("sk-c-logging-bkt"),
 		OrgId: pulumi.String(cfg.OrgID),
 		Destination: logBucket.Name.ApplyT(func(name string) string {
@@ -84,8 +98,18 @@ logName: /logs/dns.googleapis.com%2Fdns_queries`
 		}).(pulumi.StringOutput),
 		Filter:          pulumi.String(logFilter),
 		IncludeChildren: pulumi.Bool(true),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Grant storage sink writer identity access to create objects in the bucket (D15)
+	if _, err := storage.NewBucketIAMMember(ctx, "storage-sink-writer", &storage.BucketIAMMemberArgs{
+		Bucket: logBucket.Name,
+		Role:   pulumi.String("roles/storage.objectCreator"),
+		Member: storageSink.WriterIdentity,
 	}); err != nil {
-		return err
+		return nil, err
 	}
 
 	// ========================================================================
@@ -96,7 +120,7 @@ logName: /logs/dns.googleapis.com%2Fdns_queries`
 		Name:    pulumi.String("tp-org-logs"),
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if _, err := pubsub.NewSubscription(ctx, "org-log-subscription", &pubsub.SubscriptionArgs{
@@ -104,10 +128,10 @@ logName: /logs/dns.googleapis.com%2Fdns_queries`
 		Name:    pulumi.String("sub-org-logs"),
 		Topic:   logTopic.Name,
 	}); err != nil {
-		return err
+		return nil, err
 	}
 
-	if _, err := logging.NewOrganizationSink(ctx, "org-sink-pubsub", &logging.OrganizationSinkArgs{
+	pubsubSink, err := logging.NewOrganizationSink(ctx, "org-sink-pubsub", &logging.OrganizationSinkArgs{
 		Name:  pulumi.String("sk-c-logging-pub"),
 		OrgId: pulumi.String(cfg.OrgID),
 		Destination: logTopic.ID().ApplyT(func(id string) string {
@@ -115,8 +139,19 @@ logName: /logs/dns.googleapis.com%2Fdns_queries`
 		}).(pulumi.StringOutput),
 		Filter:          pulumi.String(logFilter),
 		IncludeChildren: pulumi.Bool(true),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Grant Pub/Sub sink writer identity access to publish to the topic (D15)
+	if _, err := pubsub.NewTopicIAMMember(ctx, "pubsub-sink-writer", &pubsub.TopicIAMMemberArgs{
+		Project: auditProjectID,
+		Topic:   logTopic.Name,
+		Role:    pulumi.String("roles/pubsub.publisher"),
+		Member:  pubsubSink.WriterIdentity,
 	}); err != nil {
-		return err
+		return nil, err
 	}
 
 	// ========================================================================
@@ -130,8 +165,11 @@ logName: /logs/dns.googleapis.com%2Fdns_queries`
 		FriendlyName: pulumi.String("GCP Billing Data"),
 		Location:     pulumi.String(cfg.DefaultRegion),
 	}); err != nil {
-		return err
+		return nil, err
 	}
 
-	return nil
+	return &LoggingOutputs{
+		StorageBucketName: logBucket.Name,
+		PubSubTopicName:   logTopic.Name,
+	}, nil
 }

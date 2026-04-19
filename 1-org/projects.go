@@ -32,12 +32,20 @@ type OrgProjects struct {
 	OrgSecretsProjectID    pulumi.StringOutput
 	DNSHubProjectID        pulumi.StringOutput
 	InterconnectProjectID  pulumi.StringOutput
+	NetHubProjectID        pulumi.StringOutput
 	NetworkProjectIDs      map[string]pulumi.StringOutput
 }
 
 // createProject is a helper that creates a standardized project using the
 // shared Project component from the Vitruvian Pulumi Library.
-func createProject(ctx *pulumi.Context, name, projectID string, folderID pulumi.StringOutput, billingAccount string, randomSuffix bool, apis []string) (pulumi.StringOutput, error) {
+// Labels mirror the Terraform foundation's project labeling convention (D3).
+func createProject(ctx *pulumi.Context, name, projectID string, folderID pulumi.StringOutput, billingAccount string, randomSuffix bool, apis []string, labels map[string]string) (pulumi.StringOutput, error) {
+	// Convert labels to Pulumi StringMap
+	pulumiLabels := pulumi.StringMap{}
+	for k, v := range labels {
+		pulumiLabels[k] = pulumi.String(v)
+	}
+
 	p, err := project.NewProject(ctx, name, &project.ProjectArgs{
 		ProjectID:       pulumi.String(projectID),
 		Name:            pulumi.String(projectID),
@@ -45,6 +53,7 @@ func createProject(ctx *pulumi.Context, name, projectID string, folderID pulumi.
 		BillingAccount:  pulumi.String(billingAccount),
 		RandomProjectID: randomSuffix,
 		ActivateApis:    apis,
+		Labels:          pulumiLabels,
 	})
 	if err != nil {
 		return pulumi.StringOutput{}, err
@@ -72,6 +81,14 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 		fmt.Sprintf("%s-c-logging", cfg.ProjectPrefix),
 		commonFolderID, cfg.BillingAccount, cfg.RandomSuffix,
 		[]string{"logging.googleapis.com", "bigquery.googleapis.com", "billingbudgets.googleapis.com"},
+		map[string]string{
+			"environment":      "common",
+			"application_name": "org-logging",
+			"billing_code":     "1234",
+			"business_code":    "shared",
+			"env_code":         "c",
+			"vpc":              "none",
+		},
 	)
 	if err != nil {
 		return nil, err
@@ -81,7 +98,15 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 	billingExportProjectID, err := createProject(ctx, "org-billing-export",
 		fmt.Sprintf("%s-c-billing-export", cfg.ProjectPrefix),
 		commonFolderID, cfg.BillingAccount, cfg.RandomSuffix,
-		[]string{"bigquery.googleapis.com", "billingbudgets.googleapis.com"},
+		[]string{"logging.googleapis.com", "bigquery.googleapis.com", "billingbudgets.googleapis.com"},
+		map[string]string{
+			"environment":      "common",
+			"application_name": "org-billing-export",
+			"billing_code":     "1234",
+			"business_code":    "shared",
+			"env_code":         "c",
+			"vpc":              "none",
+		},
 	)
 	if err != nil {
 		return nil, err
@@ -91,7 +116,15 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 	sccProjectID, err := createProject(ctx, "org-scc",
 		fmt.Sprintf("%s-c-scc", cfg.ProjectPrefix),
 		commonFolderID, cfg.BillingAccount, cfg.RandomSuffix,
-		[]string{"securitycenter.googleapis.com", "pubsub.googleapis.com", "billingbudgets.googleapis.com"},
+		[]string{"logging.googleapis.com", "securitycenter.googleapis.com", "pubsub.googleapis.com", "billingbudgets.googleapis.com", "cloudkms.googleapis.com"},
+		map[string]string{
+			"environment":      "common",
+			"application_name": "org-scc",
+			"billing_code":     "1234",
+			"business_code":    "shared",
+			"env_code":         "c",
+			"vpc":              "none",
+		},
 	)
 	if err != nil {
 		return nil, err
@@ -101,7 +134,15 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 	orgKMSProjectID, err := createProject(ctx, "org-kms",
 		fmt.Sprintf("%s-c-kms", cfg.ProjectPrefix),
 		commonFolderID, cfg.BillingAccount, cfg.RandomSuffix,
-		[]string{"cloudkms.googleapis.com", "billingbudgets.googleapis.com"},
+		[]string{"logging.googleapis.com", "cloudkms.googleapis.com", "billingbudgets.googleapis.com"},
+		map[string]string{
+			"environment":      "common",
+			"application_name": "org-kms",
+			"billing_code":     "1234",
+			"business_code":    "shared",
+			"env_code":         "c",
+			"vpc":              "none",
+		},
 	)
 	if err != nil {
 		return nil, err
@@ -111,7 +152,15 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 	orgSecretsProjectID, err := createProject(ctx, "org-secrets",
 		fmt.Sprintf("%s-c-secrets", cfg.ProjectPrefix),
 		commonFolderID, cfg.BillingAccount, cfg.RandomSuffix,
-		[]string{"secretmanager.googleapis.com", "billingbudgets.googleapis.com"},
+		[]string{"logging.googleapis.com", "secretmanager.googleapis.com", "billingbudgets.googleapis.com"},
+		map[string]string{
+			"environment":      "common",
+			"application_name": "org-secrets",
+			"billing_code":     "1234",
+			"business_code":    "shared",
+			"env_code":         "c",
+			"vpc":              "none",
+		},
 	)
 	if err != nil {
 		return nil, err
@@ -126,6 +175,14 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 		fmt.Sprintf("%s-net-dns", cfg.ProjectPrefix),
 		networkFolderID, cfg.BillingAccount, cfg.RandomSuffix,
 		[]string{"dns.googleapis.com", "compute.googleapis.com", "servicenetworking.googleapis.com", "logging.googleapis.com", "billingbudgets.googleapis.com"},
+		map[string]string{
+			"environment":      "network",
+			"application_name": "org-dns-hub",
+			"billing_code":     "1234",
+			"business_code":    "shared",
+			"env_code":         "net",
+			"vpc":              "none",
+		},
 	)
 	if err != nil {
 		return nil, err
@@ -135,10 +192,46 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 	interconnectProjectID, err := createProject(ctx, "org-interconnect",
 		fmt.Sprintf("%s-net-interconnect", cfg.ProjectPrefix),
 		networkFolderID, cfg.BillingAccount, cfg.RandomSuffix,
-		[]string{"compute.googleapis.com", "billingbudgets.googleapis.com"},
+		[]string{"billingbudgets.googleapis.com", "compute.googleapis.com"},
+		map[string]string{
+			"environment":      "network",
+			"application_name": "org-interconnect",
+			"billing_code":     "1234",
+			"business_code":    "shared",
+			"env_code":         "net",
+			"vpc":              "none",
+		},
 	)
 	if err != nil {
 		return nil, err
+	}
+
+	// Network Hub — conditional on hub-and-spoke architecture (D5)
+	var netHubProjectID pulumi.StringOutput
+	if cfg.EnableHubAndSpoke {
+		netHubProjectID, err = createProject(ctx, "org-net-hub",
+			fmt.Sprintf("%s-net-hub", cfg.ProjectPrefix),
+			networkFolderID, cfg.BillingAccount, cfg.RandomSuffix,
+			[]string{
+				"compute.googleapis.com",
+				"dns.googleapis.com",
+				"servicenetworking.googleapis.com",
+				"logging.googleapis.com",
+				"cloudresourcemanager.googleapis.com",
+				"billingbudgets.googleapis.com",
+			},
+			map[string]string{
+				"environment":      "network",
+				"application_name": "org-net-hub",
+				"billing_code":     "1234",
+				"business_code":    "shared",
+				"env_code":         "net",
+				"vpc":              "svpc",
+			},
+		)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Per-environment Shared VPC host projects under the Network folder
@@ -157,6 +250,14 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 				"logging.googleapis.com",
 				"billingbudgets.googleapis.com",
 			},
+			map[string]string{
+				"environment":      env,
+				"application_name": fmt.Sprintf("org-net-%s", env),
+				"billing_code":     "1234",
+				"business_code":    "shared",
+				"env_code":         code,
+				"vpc":              "svpc",
+			},
 		)
 		if err != nil {
 			return nil, err
@@ -172,6 +273,7 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 		OrgSecretsProjectID:    orgSecretsProjectID,
 		DNSHubProjectID:        dnsHubProjectID,
 		InterconnectProjectID:  interconnectProjectID,
+		NetHubProjectID:        netHubProjectID,
 		NetworkProjectIDs:      networkProjectIDs,
 	}, nil
 }
