@@ -30,9 +30,10 @@ type OrgProjects struct {
 	SCCProjectID           pulumi.StringOutput
 	OrgKMSProjectID        pulumi.StringOutput
 	OrgSecretsProjectID    pulumi.StringOutput
-	DNSHubProjectID        pulumi.StringOutput
 	InterconnectProjectID  pulumi.StringOutput
+	InterconnectProjectNumber pulumi.StringOutput // upstream: interconnect_project_number
 	NetHubProjectID        pulumi.StringOutput
+	NetHubProjectNumber    pulumi.StringOutput // upstream: net_hub_project_number
 	NetworkProjectIDs      map[string]pulumi.StringOutput
 }
 
@@ -40,7 +41,8 @@ type OrgProjects struct {
 // shared Project component from the Vitruvian Pulumi Library.
 // Labels mirror the Terraform foundation's project labeling convention (D3).
 // Budget and DefaultServiceAccount are optional — pass nil/empty to skip.
-func createProject(ctx *pulumi.Context, name, projectID string, folderID pulumi.StringOutput, cfg *OrgConfig, apis []string, labels map[string]string, budget *project.BudgetConfig) (pulumi.StringOutput, error) {
+// Returns both the project ID and project number for cross-stage exports.
+func createProject(ctx *pulumi.Context, name, projectID string, folderID pulumi.StringOutput, cfg *OrgConfig, apis []string, labels map[string]string, budget *project.BudgetConfig) (pulumi.StringOutput, pulumi.StringOutput, error) {
 	// Convert labels to Pulumi StringMap
 	pulumiLabels := pulumi.StringMap{}
 	for k, v := range labels {
@@ -60,32 +62,61 @@ func createProject(ctx *pulumi.Context, name, projectID string, folderID pulumi.
 		DefaultServiceAccount: cfg.DefaultServiceAccount,
 	})
 	if err != nil {
-		return pulumi.StringOutput{}, err
+		return pulumi.StringOutput{}, pulumi.StringOutput{}, err
 	}
-	return p.Project.ProjectId, nil
+	return p.Project.ProjectId, p.Project.Number, nil
 }
 
-// budgetFor returns a BudgetConfig for a given project budget amount, using
-// the shared alert thresholds and spend basis from the ProjectBudgetConfig.
-// Returns nil when the ProjectBudget is not configured or the amount is 0.
-func budgetFor(cfg *OrgConfig, amount float64, pubsubTopic string) *project.BudgetConfig {
-	if cfg.ProjectBudget == nil || amount == 0 {
+// budgetFor converts a PerProjectBudget to a BudgetConfig for the project
+// library. Returns nil when pb is nil or the amount is 0.
+// Matches upstream per-project budget variable shape where each project has
+// independent amount, alert_spent_percents, alert_pubsub_topic, and
+// budget_alert_spend_basis fields.
+func budgetFor(pb *PerProjectBudget) *project.BudgetConfig {
+	if pb == nil || pb.Amount == 0 {
 		return nil
 	}
-	alertPercents := cfg.ProjectBudget.AlertSpentPercents
+	alertPercents := pb.AlertSpentPercents
 	if len(alertPercents) == 0 {
-		alertPercents = []float64{1.2} // TF default
+		alertPercents = []float64{1.2} // upstream default
 	}
-	// Gap 5: default to FORECASTED_SPEND matching upstream
-	spendBasis := cfg.ProjectBudget.AlertSpendBasis
+	spendBasis := pb.AlertSpendBasis
 	if spendBasis == "" {
-		spendBasis = "FORECASTED_SPEND"
+		spendBasis = "FORECASTED_SPEND" // upstream default
 	}
 	return &project.BudgetConfig{
-		Amount:             amount,
+		Amount:             pb.Amount,
 		AlertSpentPercents: alertPercents,
-		AlertPubSubTopic:   pubsubTopic,
+		AlertPubSubTopic:   pb.AlertPubSubTopic,
 		AlertSpendBasis:    spendBasis,
+	}
+}
+
+// getProjectBudget returns the per-project budget config for the named project.
+// Returns nil when ProjectBudget is not configured.
+func getProjectBudget(cfg *OrgConfig, name string) *PerProjectBudget {
+	if cfg.ProjectBudget == nil {
+		return nil
+	}
+	switch name {
+	case "logging":
+		return &cfg.ProjectBudget.OrgAuditLogs
+	case "billing_export":
+		return &cfg.ProjectBudget.OrgBillingExport
+	case "scc":
+		return &cfg.ProjectBudget.SCC
+	case "kms":
+		return &cfg.ProjectBudget.CommonKMS
+	case "secrets":
+		return &cfg.ProjectBudget.OrgSecrets
+	case "interconnect":
+		return &cfg.ProjectBudget.Interconnect
+	case "net_hub":
+		return &cfg.ProjectBudget.NetHub
+	case "shared_network":
+		return &cfg.ProjectBudget.SharedNetwork
+	default:
+		return nil
 	}
 }
 
@@ -105,7 +136,7 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 	// ========================================================================
 
 	// Audit Logs — centralized logging destination
-	auditLogsProjectID, err := createProject(ctx, "org-logging",
+	auditLogsProjectID, _, err := createProject(ctx, "org-logging",
 		fmt.Sprintf("%s-c-logging", cfg.ProjectPrefix),
 		commonFolderID, cfg,
 		[]string{"logging.googleapis.com", "bigquery.googleapis.com", "billingbudgets.googleapis.com"},
@@ -117,14 +148,14 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 			"env_code":         "c",
 			"vpc":              "none",
 		},
-		budgetFor(cfg, budgetAmount(cfg, "logging"), budgetPubSub(cfg, "logging")),
+		budgetFor(getProjectBudget(cfg, "logging")),
 	)
 	if err != nil {
 		return nil, err
 	}
 
 	// Billing Export — BigQuery dataset for billing data
-	billingExportProjectID, err := createProject(ctx, "org-billing-export",
+	billingExportProjectID, _, err := createProject(ctx, "org-billing-export",
 		fmt.Sprintf("%s-c-billing-export", cfg.ProjectPrefix),
 		commonFolderID, cfg,
 		[]string{"logging.googleapis.com", "bigquery.googleapis.com", "billingbudgets.googleapis.com"},
@@ -136,14 +167,14 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 			"env_code":         "c",
 			"vpc":              "none",
 		},
-		budgetFor(cfg, budgetAmount(cfg, "billing_export"), ""),
+		budgetFor(getProjectBudget(cfg, "billing_export")),
 	)
 	if err != nil {
 		return nil, err
 	}
 
 	// Security Command Center — SCC notifications via Pub/Sub
-	sccProjectID, err := createProject(ctx, "org-scc",
+	sccProjectID, _, err := createProject(ctx, "org-scc",
 		fmt.Sprintf("%s-c-scc", cfg.ProjectPrefix),
 		commonFolderID, cfg,
 		[]string{"logging.googleapis.com", "securitycenter.googleapis.com", "pubsub.googleapis.com", "billingbudgets.googleapis.com", "cloudkms.googleapis.com"},
@@ -155,14 +186,14 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 			"env_code":         "c",
 			"vpc":              "none",
 		},
-		budgetFor(cfg, budgetAmount(cfg, "scc"), budgetPubSub(cfg, "scc")),
+		budgetFor(getProjectBudget(cfg, "scc")),
 	)
 	if err != nil {
 		return nil, err
 	}
 
 	// KMS — org-level key management
-	orgKMSProjectID, err := createProject(ctx, "org-kms",
+	orgKMSProjectID, _, err := createProject(ctx, "org-kms",
 		fmt.Sprintf("%s-c-kms", cfg.ProjectPrefix),
 		commonFolderID, cfg,
 		[]string{"logging.googleapis.com", "cloudkms.googleapis.com", "billingbudgets.googleapis.com"},
@@ -174,14 +205,14 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 			"env_code":         "c",
 			"vpc":              "none",
 		},
-		budgetFor(cfg, budgetAmount(cfg, "kms"), ""),
+		budgetFor(getProjectBudget(cfg, "kms")),
 	)
 	if err != nil {
 		return nil, err
 	}
 
 	// Secrets — org-level secret storage
-	orgSecretsProjectID, err := createProject(ctx, "org-secrets",
+	orgSecretsProjectID, _, err := createProject(ctx, "org-secrets",
 		fmt.Sprintf("%s-c-secrets", cfg.ProjectPrefix),
 		commonFolderID, cfg,
 		[]string{"logging.googleapis.com", "secretmanager.googleapis.com", "billingbudgets.googleapis.com"},
@@ -193,7 +224,7 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 			"env_code":         "c",
 			"vpc":              "none",
 		},
-		budgetFor(cfg, budgetAmount(cfg, "secrets"), ""),
+		budgetFor(getProjectBudget(cfg, "secrets")),
 	)
 	if err != nil {
 		return nil, err
@@ -203,27 +234,8 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 	// Network Folder Projects
 	// ========================================================================
 
-	// DNS Hub — centralized DNS management
-	dnsHubProjectID, err := createProject(ctx, "org-dns-hub",
-		fmt.Sprintf("%s-net-dns", cfg.ProjectPrefix),
-		networkFolderID, cfg,
-		[]string{"dns.googleapis.com", "compute.googleapis.com", "servicenetworking.googleapis.com", "logging.googleapis.com", "billingbudgets.googleapis.com"},
-		map[string]string{
-			"environment":      "network",
-			"application_name": "org-dns-hub",
-			"billing_code":     "1234",
-			"business_code":    "shared",
-			"env_code":         "net",
-			"vpc":              "none",
-		},
-		budgetFor(cfg, budgetAmount(cfg, "dns_hub"), ""),
-	)
-	if err != nil {
-		return nil, err
-	}
-
 	// Interconnect — Dedicated/Partner Interconnect connections
-	interconnectProjectID, err := createProject(ctx, "org-interconnect",
+	interconnectProjectID, interconnectProjectNumber, err := createProject(ctx, "org-interconnect",
 		fmt.Sprintf("%s-net-interconnect", cfg.ProjectPrefix),
 		networkFolderID, cfg,
 		[]string{"billingbudgets.googleapis.com", "compute.googleapis.com"},
@@ -235,7 +247,7 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 			"env_code":         "net",
 			"vpc":              "none",
 		},
-		budgetFor(cfg, budgetAmount(cfg, "interconnect"), ""),
+		budgetFor(getProjectBudget(cfg, "interconnect")),
 	)
 	if err != nil {
 		return nil, err
@@ -243,8 +255,9 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 
 	// Network Hub — conditional on hub-and-spoke architecture (D5)
 	var netHubProjectID pulumi.StringOutput
+	var netHubProjectNumber pulumi.StringOutput
 	if cfg.EnableHubAndSpoke {
-		netHubProjectID, err = createProject(ctx, "org-net-hub",
+		netHubProjectID, netHubProjectNumber, err = createProject(ctx, "org-net-hub",
 			fmt.Sprintf("%s-net-hub", cfg.ProjectPrefix),
 			networkFolderID, cfg,
 			[]string{
@@ -263,7 +276,7 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 				"env_code":         "net",
 				"vpc":              "svpc",
 			},
-			budgetFor(cfg, budgetAmount(cfg, "net_hub"), budgetPubSub(cfg, "net_hub")),
+			budgetFor(getProjectBudget(cfg, "net_hub")),
 		)
 		if err != nil {
 			return nil, err
@@ -271,25 +284,11 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 	}
 
 	// Per-environment Shared VPC host projects under the Network folder
+	// Mirrors: module "environment_network" in upstream projects.tf
 	envCodes := map[string]string{"development": "d", "nonproduction": "n", "production": "p"}
 	networkProjectIDs := make(map[string]pulumi.StringOutput)
 	for env, code := range envCodes {
-		// Per-env shared network budget (Gap 6)
-		var networkBudget *project.BudgetConfig
-		if cfg.ProjectBudget != nil && cfg.ProjectBudget.SharedNetworkBudgetAmount > 0 {
-			spendBasis := cfg.ProjectBudget.AlertSpendBasis
-			if spendBasis == "" {
-				spendBasis = "FORECASTED_SPEND"
-			}
-			networkBudget = &project.BudgetConfig{
-				Amount:            cfg.ProjectBudget.SharedNetworkBudgetAmount,
-				AlertSpentPercents: cfg.ProjectBudget.AlertSpentPercents,
-				AlertPubSubTopic:  cfg.ProjectBudget.SharedNetworkAlertPubSubTopic,
-				AlertSpendBasis:   spendBasis,
-			}
-		}
-
-		netProjectID, err := createProject(ctx,
+		netProjectID, _, err := createProject(ctx,
 			fmt.Sprintf("org-net-%s", env),
 			fmt.Sprintf("%s-%s-svpc", cfg.ProjectPrefix, code),
 			networkFolderID, cfg,
@@ -299,17 +298,18 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 				"servicenetworking.googleapis.com",
 				"container.googleapis.com",
 				"logging.googleapis.com",
+				"cloudresourcemanager.googleapis.com",  // Gap 2: matches upstream network module
+				"accesscontextmanager.googleapis.com", // Gap 2: needed for VPC Service Controls
 				"billingbudgets.googleapis.com",
 			},
 			map[string]string{
 				"environment":      env,
-				"application_name": fmt.Sprintf("org-net-%s", env),
+				"application_name": "shared-vpc-host", // upstream label value
 				"billing_code":     "1234",
 				"business_code":    "shared",
 				"env_code":         code,
-				"vpc":              "svpc",
 			},
-			networkBudget,
+			budgetFor(getProjectBudget(cfg, "shared_network")),
 		)
 		if err != nil {
 			return nil, err
@@ -318,59 +318,17 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 	}
 
 	return &OrgProjects{
-		AuditLogsProjectID:     auditLogsProjectID,
-		BillingExportProjectID: billingExportProjectID,
-		SCCProjectID:           sccProjectID,
-		OrgKMSProjectID:        orgKMSProjectID,
-		OrgSecretsProjectID:    orgSecretsProjectID,
-		DNSHubProjectID:        dnsHubProjectID,
-		InterconnectProjectID:  interconnectProjectID,
-		NetHubProjectID:        netHubProjectID,
-		NetworkProjectIDs:      networkProjectIDs,
+		AuditLogsProjectID:        auditLogsProjectID,
+		BillingExportProjectID:    billingExportProjectID,
+		SCCProjectID:              sccProjectID,
+		OrgKMSProjectID:           orgKMSProjectID,
+		OrgSecretsProjectID:       orgSecretsProjectID,
+		InterconnectProjectID:     interconnectProjectID,
+		InterconnectProjectNumber: interconnectProjectNumber,
+		NetHubProjectID:           netHubProjectID,
+		NetHubProjectNumber:       netHubProjectNumber,
+		NetworkProjectIDs:         networkProjectIDs,
 	}, nil
 }
 
-// budgetAmount returns the configured budget amount for a given project name.
-// Returns 0 when no ProjectBudget is set (which tells budgetFor to return nil).
-func budgetAmount(cfg *OrgConfig, projectName string) float64 {
-	if cfg.ProjectBudget == nil {
-		return 0
-	}
-	switch projectName {
-	case "logging":
-		return cfg.ProjectBudget.OrgLoggingBudgetAmount
-	case "billing_export":
-		return cfg.ProjectBudget.OrgBillingExportAmount
-	case "scc":
-		return cfg.ProjectBudget.OrgSCCBudgetAmount
-	case "kms":
-		return cfg.ProjectBudget.OrgKMSBudgetAmount
-	case "secrets":
-		return cfg.ProjectBudget.OrgSecretsBudgetAmount
-	case "dns_hub":
-		return cfg.ProjectBudget.OrgDNSHubBudgetAmount
-	case "interconnect":
-		return cfg.ProjectBudget.OrgInterconnectBudgetAmount
-	case "net_hub":
-		return cfg.ProjectBudget.OrgNetHubBudgetAmount
-	default:
-		return 0
-	}
-}
 
-// budgetPubSub returns the configured Pub/Sub topic for budget alerts, if any.
-func budgetPubSub(cfg *OrgConfig, projectName string) string {
-	if cfg.ProjectBudget == nil {
-		return ""
-	}
-	switch projectName {
-	case "logging":
-		return cfg.ProjectBudget.OrgLoggingAlertPubSubTopic
-	case "scc":
-		return cfg.ProjectBudget.OrgSCCAlertPubSubTopic
-	case "net_hub":
-		return cfg.ProjectBudget.OrgNetHubAlertPubSubTopic
-	default:
-		return ""
-	}
-}

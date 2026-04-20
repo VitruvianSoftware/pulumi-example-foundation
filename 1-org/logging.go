@@ -29,8 +29,11 @@ import (
 
 // LoggingOutputs holds resource references for downstream exports.
 type LoggingOutputs struct {
-	StorageBucketName pulumi.StringOutput
-	PubSubTopicName   pulumi.StringOutput
+	StorageBucketName    pulumi.StringOutput
+	PubSubTopicName      pulumi.StringOutput
+	LogBucketName        pulumi.StringOutput // upstream: logs_export_project_logbucket_name
+	LinkedDatasetName    pulumi.StringOutput // upstream: logs_export_project_linked_dataset_name
+	BillingSinkNames     []pulumi.StringOutput // upstream: billing_sink_names
 	// LastResource is the last resource created by the logging deployment,
 	// used for dependency ordering (e.g., policies must wait for sinks).
 	LastResource pulumi.Resource
@@ -80,13 +83,14 @@ logName: /logs/dns.googleapis.com%2Fdns_queries`
 
 	// Linked BigQuery dataset for log analytics (query logs via SQL)
 	// Mirrors: linked_dataset_id = "ds_c_prj_aggregated_logs_analytics"
-	if _, err := logging.NewLinkedDataset(ctx, "aggregated-logs-dataset", &logging.LinkedDatasetArgs{
+	linkedDataset, err := logging.NewLinkedDataset(ctx, "aggregated-logs-dataset", &logging.LinkedDatasetArgs{
 		Parent:      auditProjectID.ApplyT(func(id string) string { return "projects/" + id }).(pulumi.StringOutput),
 		Bucket:      logProjectBucket.ID(),
 		LinkId:      pulumi.String("ds_c_prj_aggregated_logs_analytics"),
 		Location:    pulumi.String(cfg.DefaultRegion),
 		Description: pulumi.String("Project destination BigQuery Dataset for Logbucket analytics"),
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, err
 	}
 
@@ -196,6 +200,7 @@ logName: /logs/dns.googleapis.com%2Fdns_queries`
 	// Creates billing account sinks to the same three destinations so that
 	// billing account audit logs are captured alongside org-level logs.
 	// ========================================================================
+	var billingSinkNames []pulumi.StringOutput
 	if cfg.EnableBillingAccountSink {
 		// Billing Account Sink → Cloud Storage
 		billingSinkStorage, err := logging.NewBillingAccountSink(ctx, "billing-sink-storage", &logging.BillingAccountSinkArgs{
@@ -208,6 +213,7 @@ logName: /logs/dns.googleapis.com%2Fdns_queries`
 		if err != nil {
 			return nil, err
 		}
+		billingSinkNames = append(billingSinkNames, billingSinkStorage.Name)
 		if _, err := storage.NewBucketIAMMember(ctx, "storage-sink-writer-billing", &storage.BucketIAMMemberArgs{
 			Bucket: logBucket.Name,
 			Role:   pulumi.String("roles/storage.objectCreator"),
@@ -227,6 +233,7 @@ logName: /logs/dns.googleapis.com%2Fdns_queries`
 		if err != nil {
 			return nil, err
 		}
+		billingSinkNames = append(billingSinkNames, billingSinkPubsub.Name)
 		if _, err := pubsub.NewTopicIAMMember(ctx, "pubsub-sink-writer-billing", &pubsub.TopicIAMMemberArgs{
 			Project: auditProjectID,
 			Topic:   logTopic.Name,
@@ -247,6 +254,7 @@ logName: /logs/dns.googleapis.com%2Fdns_queries`
 		if err != nil {
 			return nil, err
 		}
+		billingSinkNames = append(billingSinkNames, billingSinkProject.Name)
 		// Grant billing sink writer identity logWriter on the audit project
 		billingProjectWriter, err := projects.NewIAMMember(ctx, "project-sink-writer-billing", &projects.IAMMemberArgs{
 			Project: auditProjectID,
@@ -276,6 +284,9 @@ logName: /logs/dns.googleapis.com%2Fdns_queries`
 	return &LoggingOutputs{
 		StorageBucketName: logBucket.Name,
 		PubSubTopicName:   logTopic.Name,
+		LogBucketName:     logProjectBucket.ID().ApplyT(func(id string) string { return id }).(pulumi.StringOutput),
+		LinkedDatasetName: linkedDataset.Name,
+		BillingSinkNames:  billingSinkNames,
 		LastResource:      lastResource,
 	}, nil
 }

@@ -92,8 +92,10 @@ func main() {
 		}
 
 		// 6b. Deploy CAI Monitoring infrastructure (Gap 2)
+		var caiOutputs *CAIMonitoringOutputs
 		if cfg.EnableSCCResources {
-			if err := deployCAIMonitoring(ctx, cfg, projOutputs.SCCProjectID); err != nil {
+			caiOutputs, err = deployCAIMonitoring(ctx, cfg, projOutputs.SCCProjectID)
+			if err != nil {
 				return err
 			}
 		}
@@ -138,18 +140,46 @@ func main() {
 		ctx.Export("scc_project_id", projOutputs.SCCProjectID)
 		ctx.Export("org_kms_project_id", projOutputs.OrgKMSProjectID)
 		ctx.Export("org_secrets_project_id", projOutputs.OrgSecretsProjectID)
-		ctx.Export("dns_hub_project_id", projOutputs.DNSHubProjectID)
 		ctx.Export("interconnect_project_id", projOutputs.InterconnectProjectID)
+		ctx.Export("interconnect_project_number", projOutputs.InterconnectProjectNumber)
 		if cfg.EnableHubAndSpoke {
 			ctx.Export("net_hub_project_id", projOutputs.NetHubProjectID)
+			ctx.Export("net_hub_project_number", projOutputs.NetHubProjectNumber)
 		}
 		for env, id := range projOutputs.NetworkProjectIDs {
 			ctx.Export(fmt.Sprintf("%s_network_project_id", env), id)
 		}
 
+		// Shared VPC projects grouped by environment (upstream: shared_vpc_projects)
+		sharedVPCMap := pulumi.Map{}
+		for env, id := range projOutputs.NetworkProjectIDs {
+			sharedVPCMap[env] = id
+		}
+		ctx.Export("shared_vpc_projects", sharedVPCMap.ToMapOutput())
+
 		// Logging
 		ctx.Export("logs_export_storage_bucket_name", logOutputs.StorageBucketName)
 		ctx.Export("logs_export_pubsub_topic", logOutputs.PubSubTopicName)
+		ctx.Export("logs_export_project_logbucket_name", logOutputs.LogBucketName)
+		ctx.Export("logs_export_project_linked_dataset_name", logOutputs.LinkedDatasetName)
+		if len(logOutputs.BillingSinkNames) > 0 {
+			billingSinkArr := make(pulumi.StringArray, len(logOutputs.BillingSinkNames))
+			for i, name := range logOutputs.BillingSinkNames {
+				billingSinkArr[i] = name
+			}
+			ctx.Export("billing_sink_names", billingSinkArr)
+		}
+
+		// SCC
+		ctx.Export("scc_notification_name", pulumi.String(cfg.SCCNotificationName))
+
+		// CAI Monitoring
+		if caiOutputs != nil {
+			ctx.Export("cai_monitoring_artifact_registry", caiOutputs.ArtifactRegistryName)
+			ctx.Export("cai_monitoring_asset_feed", caiOutputs.AssetFeedName)
+			ctx.Export("cai_monitoring_bucket", caiOutputs.BucketName)
+			ctx.Export("cai_monitoring_topic", caiOutputs.TopicName)
+		}
 
 		// Tags
 		ctx.Export("tags", tagOutputs)
@@ -168,36 +198,32 @@ type RetentionPolicy struct {
 	RetentionPeriodDays int
 }
 
-// ProjectBudgetConfig mirrors the TF foundation's project_budget variable (H2).
-// Each field controls budget amounts and alerting per project.
-// Amount defaults to 1000, AlertSpentPercents defaults to [1.2],
-// AlertSpendBasis defaults to "FORECASTED_SPEND".
-type ProjectBudgetConfig struct {
-	// Per-project budget amounts (in billing account currency, e.g. USD)
-	OrgLoggingBudgetAmount      float64
-	OrgBillingExportAmount      float64
-	OrgSCCBudgetAmount          float64
-	OrgKMSBudgetAmount          float64
-	OrgSecretsBudgetAmount      float64
-	OrgDNSHubBudgetAmount       float64
-	OrgInterconnectBudgetAmount float64
-	OrgNetHubBudgetAmount       float64
-
-	// Per-environment shared network budget
-	SharedNetworkBudgetAmount float64
-
-	// Shared alert thresholds (defaults: [1.2])
+// PerProjectBudget holds the budget configuration for a single project.
+// Each field matches the upstream TF per-project budget variables:
+//   - Amount:             e.g. org_audit_logs_budget_amount (default 1000)
+//   - AlertSpentPercents: e.g. org_audit_logs_alert_spent_percents (default [1.2])
+//   - AlertPubSubTopic:   e.g. org_audit_logs_alert_pubsub_topic (default null)
+//   - AlertSpendBasis:    e.g. org_audit_logs_budget_alert_spend_basis (default "FORECASTED_SPEND")
+type PerProjectBudget struct {
+	Amount             float64
 	AlertSpentPercents []float64
+	AlertPubSubTopic   string
+	AlertSpendBasis    string
+}
 
-	// AlertSpendBasis is the type of basis: "CURRENT_SPEND" or "FORECASTED_SPEND".
-	// Defaults to "FORECASTED_SPEND" matching upstream.
-	AlertSpendBasis string
-
-	// Optional per-project Pub/Sub topics for budget notifications
-	OrgLoggingAlertPubSubTopic       string
-	OrgSCCAlertPubSubTopic           string
-	OrgNetHubAlertPubSubTopic        string
-	SharedNetworkAlertPubSubTopic    string
+// ProjectBudgetConfig mirrors the TF foundation's project_budget variable (H2).
+// Each project has independent budget controls matching the upstream per-project
+// variable shape with amount, alert_spent_percents, alert_pubsub_topic, and
+// budget_alert_spend_basis.
+type ProjectBudgetConfig struct {
+	OrgAuditLogs     PerProjectBudget
+	OrgBillingExport PerProjectBudget
+	SCC              PerProjectBudget
+	CommonKMS        PerProjectBudget
+	OrgSecrets       PerProjectBudget
+	Interconnect     PerProjectBudget
+	NetHub           PerProjectBudget
+	SharedNetwork    PerProjectBudget
 }
 
 // OrgConfig holds all configuration for the organization stage.
@@ -340,6 +366,12 @@ func loadOrgConfig(ctx *pulumi.Context) *OrgConfig {
 
 		// Bootstrap
 		BootstrapFolderName: conf.Get("bootstrap_folder_name"),
+	}
+
+	// Parse structured config for ProjectBudget
+	var pb ProjectBudgetConfig
+	if err := conf.GetObject("project_budget", &pb); err == nil {
+		c.ProjectBudget = &pb
 	}
 
 	// Random suffix defaults to true, matching upstream Terraform foundation.

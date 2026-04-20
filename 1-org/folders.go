@@ -28,6 +28,14 @@ type Folders struct {
 	Environments map[string]*organizations.Folder
 }
 
+// deployFolders creates the top-level organization folders.
+//
+// Upstream deviation: The Terraform foundation's 1-org/envs/shared/folders.tf
+// only creates Common and Network folders. Environment folders (development,
+// nonproduction, production) are created in the separate 2-environments stage.
+// This Pulumi implementation consolidates all five folders into 1-org for
+// simpler single-stage deployment. This is a deliberate choice that does not
+// affect downstream functionality.
 func deployFolders(ctx *pulumi.Context, cfg *OrgConfig) (*Folders, error) {
 	// Folder resource options — apply deletion protection when enabled (D11)
 	var folderOpts []pulumi.ResourceOption
