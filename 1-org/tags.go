@@ -65,7 +65,8 @@ func deployTags(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (pulumi.M
 	}
 
 	// Tag values for each lifecycle stage
-	envValues := []string{"bootstrap", "common", "development", "nonproduction", "production"}
+	// Note: upstream does NOT have a "common" value — Common folder is tagged "production"
+	envValues := []string{"bootstrap", "development", "nonproduction", "production"}
 	tagValueMap := make(map[string]*tags.TagValue)
 	tagOutputMap := make(pulumi.Map)
 

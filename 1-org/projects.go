@@ -76,10 +76,16 @@ func budgetFor(cfg *OrgConfig, amount float64, pubsubTopic string) *project.Budg
 	if len(alertPercents) == 0 {
 		alertPercents = []float64{1.2} // TF default
 	}
+	// Gap 5: default to FORECASTED_SPEND matching upstream
+	spendBasis := cfg.ProjectBudget.AlertSpendBasis
+	if spendBasis == "" {
+		spendBasis = "FORECASTED_SPEND"
+	}
 	return &project.BudgetConfig{
 		Amount:             amount,
 		AlertSpentPercents: alertPercents,
 		AlertPubSubTopic:   pubsubTopic,
+		AlertSpendBasis:    spendBasis,
 	}
 }
 
@@ -268,6 +274,21 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 	envCodes := map[string]string{"development": "d", "nonproduction": "n", "production": "p"}
 	networkProjectIDs := make(map[string]pulumi.StringOutput)
 	for env, code := range envCodes {
+		// Per-env shared network budget (Gap 6)
+		var networkBudget *project.BudgetConfig
+		if cfg.ProjectBudget != nil && cfg.ProjectBudget.SharedNetworkBudgetAmount > 0 {
+			spendBasis := cfg.ProjectBudget.AlertSpendBasis
+			if spendBasis == "" {
+				spendBasis = "FORECASTED_SPEND"
+			}
+			networkBudget = &project.BudgetConfig{
+				Amount:            cfg.ProjectBudget.SharedNetworkBudgetAmount,
+				AlertSpentPercents: cfg.ProjectBudget.AlertSpentPercents,
+				AlertPubSubTopic:  cfg.ProjectBudget.SharedNetworkAlertPubSubTopic,
+				AlertSpendBasis:   spendBasis,
+			}
+		}
+
 		netProjectID, err := createProject(ctx,
 			fmt.Sprintf("org-net-%s", env),
 			fmt.Sprintf("%s-%s-svpc", cfg.ProjectPrefix, code),
@@ -288,7 +309,7 @@ func deployOrgProjects(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (*
 				"env_code":         code,
 				"vpc":              "svpc",
 			},
-			nil, // per-env network budgets could be added in follow-up
+			networkBudget,
 		)
 		if err != nil {
 			return nil, err

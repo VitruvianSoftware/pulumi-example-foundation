@@ -21,6 +21,7 @@ import (
 
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/bigquery"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/logging"
+	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/projects"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/pubsub"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/storage"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
@@ -30,6 +31,9 @@ import (
 type LoggingOutputs struct {
 	StorageBucketName pulumi.StringOutput
 	PubSubTopicName   pulumi.StringOutput
+	// LastResource is the last resource created by the logging deployment,
+	// used for dependency ordering (e.g., policies must wait for sinks).
+	LastResource pulumi.Resource
 }
 
 // deployCentralizedLogging creates the centralized logging infrastructure:
@@ -39,6 +43,10 @@ type LoggingOutputs struct {
 //
 // Critical fix (D15): Grants sink writer identities IAM on destinations so
 // logs are actually delivered instead of failing with 403.
+//
+// When EnableBillingAccountSink is true (default), billing account sinks are
+// created alongside the org sinks, mirroring the upstream centralized-logging
+// module's enable_billing_account_sink = true behavior.
 func deployCentralizedLogging(ctx *pulumi.Context, cfg *OrgConfig, auditProjectID, billingExportProjectID pulumi.StringOutput) (*LoggingOutputs, error) {
 	// Comprehensive log filter covering all audit and network logs
 	logFilter := `logName: /logs/cloudaudit.googleapis.com%2Factivity OR
@@ -49,6 +57,9 @@ logName: /logs/cloudaudit.googleapis.com%2Fpolicy OR
 logName: /logs/compute.googleapis.com%2Fvpc_flows OR
 logName: /logs/compute.googleapis.com%2Ffirewall OR
 logName: /logs/dns.googleapis.com%2Fdns_queries`
+
+	// Track the last resource created for dependency ordering
+	var lastResource pulumi.Resource
 
 	// ========================================================================
 	// 1. Logging Project Bucket (G10)
@@ -80,7 +91,7 @@ logName: /logs/dns.googleapis.com%2Fdns_queries`
 	}
 
 	// 1b. Organization Sink → Logging Project Bucket
-	_, err = logging.NewOrganizationSink(ctx, "org-sink-project", &logging.OrganizationSinkArgs{
+	orgSinkProject, err := logging.NewOrganizationSink(ctx, "org-sink-project", &logging.OrganizationSinkArgs{
 		Name:  pulumi.String("sk-c-logging-prj"),
 		OrgId: pulumi.String(cfg.OrgID),
 		Destination: auditProjectID.ApplyT(func(id string) string {
@@ -92,7 +103,7 @@ logName: /logs/dns.googleapis.com%2Fdns_queries`
 	if err != nil {
 		return nil, err
 	}
-
+	lastResource = orgSinkProject
 
 	// ========================================================================
 	// 2. Organization Sink → Cloud Storage (long-term retention)
@@ -169,17 +180,87 @@ logName: /logs/dns.googleapis.com%2Fdns_queries`
 	}
 
 	// Grant Pub/Sub sink writer identity access to publish to the topic (D15)
-	if _, err := pubsub.NewTopicIAMMember(ctx, "pubsub-sink-writer", &pubsub.TopicIAMMemberArgs{
+	pubsubSinkWriter, err := pubsub.NewTopicIAMMember(ctx, "pubsub-sink-writer", &pubsub.TopicIAMMemberArgs{
 		Project: auditProjectID,
 		Topic:   logTopic.Name,
 		Role:    pulumi.String("roles/pubsub.publisher"),
 		Member:  pubsubSink.WriterIdentity,
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, err
+	}
+	lastResource = pubsubSinkWriter
+
+	// ========================================================================
+	// 4a. Billing Account Sinks (Gap 1 — upstream enable_billing_account_sink)
+	// Creates billing account sinks to the same three destinations so that
+	// billing account audit logs are captured alongside org-level logs.
+	// ========================================================================
+	if cfg.EnableBillingAccountSink {
+		// Billing Account Sink → Cloud Storage
+		billingSinkStorage, err := logging.NewBillingAccountSink(ctx, "billing-sink-storage", &logging.BillingAccountSinkArgs{
+			Name:           pulumi.String("sk-c-logging-bkt-billing"),
+			BillingAccount: pulumi.String(cfg.BillingAccount),
+			Destination: logBucket.Name.ApplyT(func(name string) string {
+				return fmt.Sprintf("storage.googleapis.com/%s", name)
+			}).(pulumi.StringOutput),
+		})
+		if err != nil {
+			return nil, err
+		}
+		if _, err := storage.NewBucketIAMMember(ctx, "storage-sink-writer-billing", &storage.BucketIAMMemberArgs{
+			Bucket: logBucket.Name,
+			Role:   pulumi.String("roles/storage.objectCreator"),
+			Member: billingSinkStorage.WriterIdentity,
+		}); err != nil {
+			return nil, err
+		}
+
+		// Billing Account Sink → Pub/Sub
+		billingSinkPubsub, err := logging.NewBillingAccountSink(ctx, "billing-sink-pubsub", &logging.BillingAccountSinkArgs{
+			Name:           pulumi.String("sk-c-logging-pub-billing"),
+			BillingAccount: pulumi.String(cfg.BillingAccount),
+			Destination: logTopic.ID().ApplyT(func(id string) string {
+				return fmt.Sprintf("pubsub.googleapis.com/%s", id)
+			}).(pulumi.StringOutput),
+		})
+		if err != nil {
+			return nil, err
+		}
+		if _, err := pubsub.NewTopicIAMMember(ctx, "pubsub-sink-writer-billing", &pubsub.TopicIAMMemberArgs{
+			Project: auditProjectID,
+			Topic:   logTopic.Name,
+			Role:    pulumi.String("roles/pubsub.publisher"),
+			Member:  billingSinkPubsub.WriterIdentity,
+		}); err != nil {
+			return nil, err
+		}
+
+		// Billing Account Sink → Logging Project Bucket
+		billingSinkProject, err := logging.NewBillingAccountSink(ctx, "billing-sink-project", &logging.BillingAccountSinkArgs{
+			Name:           pulumi.String("sk-c-logging-prj-billing"),
+			BillingAccount: pulumi.String(cfg.BillingAccount),
+			Destination: auditProjectID.ApplyT(func(id string) string {
+				return fmt.Sprintf("logging.googleapis.com/projects/%s/locations/%s/buckets/AggregatedLogs", id, cfg.DefaultRegion)
+			}).(pulumi.StringOutput),
+		})
+		if err != nil {
+			return nil, err
+		}
+		// Grant billing sink writer identity logWriter on the audit project
+		billingProjectWriter, err := projects.NewIAMMember(ctx, "project-sink-writer-billing", &projects.IAMMemberArgs{
+			Project: auditProjectID,
+			Role:    pulumi.String("roles/logging.logWriter"),
+			Member:  billingSinkProject.WriterIdentity,
+		})
+		if err != nil {
+			return nil, err
+		}
+		lastResource = billingProjectWriter
 	}
 
 	// ========================================================================
-	// 4. Billing Export BigQuery Dataset
+	// 4b. Billing Export BigQuery Dataset
 	// Note: The actual billing export must be configured manually in the
 	// Cloud Console, as there is no API to automate this currently.
 	// ========================================================================
@@ -195,6 +276,7 @@ logName: /logs/dns.googleapis.com%2Fdns_queries`
 	return &LoggingOutputs{
 		StorageBucketName: logBucket.Name,
 		PubSubTopicName:   logTopic.Name,
+		LastResource:      lastResource,
 	}, nil
 }
 
