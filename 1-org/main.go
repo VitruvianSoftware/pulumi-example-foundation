@@ -130,9 +130,6 @@ func main() {
 		ctx.Export("common_folder_id", folders.Common.ID())
 		ctx.Export("network_folder_name", folders.Network.Name)
 		ctx.Export("network_folder_id", folders.Network.ID())
-		for env, f := range folders.Environments {
-			ctx.Export(fmt.Sprintf("%s_folder_id", env), f.ID())
-		}
 
 		// Projects
 		ctx.Export("org_audit_logs_project_id", projOutputs.AuditLogsProjectID)

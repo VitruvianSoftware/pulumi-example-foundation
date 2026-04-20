@@ -23,19 +23,16 @@ import (
 )
 
 type Folders struct {
-	Common       *organizations.Folder
-	Network      *organizations.Folder
-	Environments map[string]*organizations.Folder
+	Common  *organizations.Folder
+	Network *organizations.Folder
 }
 
-// deployFolders creates the top-level organization folders.
+// deployFolders creates the top-level organization folders (Common and Network).
+// This mirrors the Terraform foundation's 1-org/envs/shared/folders.tf exactly.
 //
-// Upstream deviation: The Terraform foundation's 1-org/envs/shared/folders.tf
-// only creates Common and Network folders. Environment folders (development,
-// nonproduction, production) are created in the separate 2-environments stage.
-// This Pulumi implementation consolidates all five folders into 1-org for
-// simpler single-stage deployment. This is a deliberate choice that does not
-// affect downstream functionality.
+// Environment folders (development, nonproduction, production) are created in
+// the 2-environments stage, matching the upstream architecture where each stage
+// owns its specific resources.
 func deployFolders(ctx *pulumi.Context, cfg *OrgConfig) (*Folders, error) {
 	// Folder resource options — apply deletion protection when enabled (D11)
 	var folderOpts []pulumi.ResourceOption
@@ -63,25 +60,9 @@ func deployFolders(ctx *pulumi.Context, cfg *OrgConfig) (*Folders, error) {
 		return nil, err
 	}
 
-	// Environment Folders
-	envs := []string{"development", "nonproduction", "production"}
-	envFolders := make(map[string]*organizations.Folder)
-	for _, env := range envs {
-		f, err := organizations.NewFolder(ctx, fmt.Sprintf("folder-%s", env), &organizations.FolderArgs{
-			DisplayName:        pulumi.String(fmt.Sprintf("%s-%s", cfg.FolderPrefix, env)),
-			Parent:             pulumi.String(cfg.Parent),
-			DeletionProtection: pulumi.Bool(cfg.FolderDeletionProtection),
-		}, folderOpts...)
-		if err != nil {
-			return nil, err
-		}
-		envFolders[env] = f
-	}
-
 	return &Folders{
-		Common:       common,
-		Network:      network,
-		Environments: envFolders,
+		Common:  common,
+		Network: network,
 	}, nil
 }
 
