@@ -145,6 +145,7 @@ type Config struct {
 	ParentID         string // The numeric ID for parent-level IAM bindings
 	OrgPolicyAdminRole bool
 	BucketForceDestroy bool
+	BucketTFStateKMSForceDestroy bool // When deleting a bucket, this boolean option will delete the KMS keys
 	RandomSuffix       bool // Append random hex suffix to project IDs (default: true)
 	ProjectDeletionPolicy    string // "PREVENT" or "DELETE" (default: "PREVENT")
 	FolderDeletionProtection bool   // Prevent Terraform from destroying the folder (default: true)
@@ -218,6 +219,7 @@ func loadConfig(ctx *pulumi.Context) *Config {
 
 	c.OrgPolicyAdminRole = conf.Get("org_policy_admin_role") == "true"
 	c.BucketForceDestroy = conf.Get("bucket_force_destroy") == "true"
+	c.BucketTFStateKMSForceDestroy = conf.Get("bucket_tfstate_kms_force_destroy") == "true"
 	c.FolderDeletionProtection = conf.Get("folder_deletion_protection") != "false"
 	c.CreateRequiredGroups = conf.Get("create_required_groups") == "true"
 	c.CreateOptionalGroups = conf.Get("create_optional_groups") == "true"

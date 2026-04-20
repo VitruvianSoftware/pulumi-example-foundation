@@ -48,12 +48,13 @@ type CICDProject struct {
 //   - Org policy for cross-project SA usage
 //   - State bucket IAM grants
 func deploySeedProject(ctx *pulumi.Context, cfg *Config, folderID pulumi.StringOutput, bucketIAMMembers []pulumi.StringInput) (*SeedProject, error) {
+	kmsPrevent := !cfg.BucketTFStateKMSForceDestroy
 	b, err := bootstrap.NewBootstrap(ctx, "seed-bootstrap", &bootstrap.BootstrapArgs{
 		OrgID:          cfg.OrgID,
 		FolderID:       folderID,
 		BillingAccount: cfg.BillingAccount,
 		ProjectPrefix:  cfg.ProjectPrefix,
-		DefaultRegion:  cfg.DefaultRegionKMS,
+		DefaultRegion:  cfg.DefaultRegion,
 		RandomSuffix:   cfg.RandomSuffix,
 		ProjectLabels: pulumi.StringMap{
 			"environment":       pulumi.String("bootstrap"),
@@ -95,6 +96,7 @@ func deploySeedProject(ctx *pulumi.Context, cfg *Config, folderID pulumi.StringO
 
 		// KMS — matches TF foundation defaults
 		KeyProtectionLevel: cfg.KMSKeyProtectionLevel,
+		KMSPreventDestroy:  &kmsPrevent,
 
 		// State bucket IAM — grant access to all pipeline SAs and org admins
 		StateBucketIAMMembers: bucketIAMMembers,
