@@ -25,9 +25,23 @@ import (
 
 func main() {
 	pulumi.Run(func(ctx *pulumi.Context) error {
+		// 1. Stack References — resolve outputs from 0-bootstrap and 1-org
+		// Mirrors upstream remote.tf which reads common_config from bootstrap
+		// and tags from org.
 		cfg := loadEnvConfig(ctx)
 
-		// 1. Stack References — resolve outputs from 0-bootstrap and 1-org
+		bootstrapStack, err := pulumi.NewStackReference(ctx, "bootstrap", &pulumi.StackReferenceArgs{
+			Name: pulumi.String(cfg.BootstrapStackName),
+		})
+		if err != nil {
+			return err
+		}
+
+		// Resolve common_config from bootstrap — upstream reads:
+		// org_id, parent_id, billing_account, project_prefix, folder_prefix
+		commonConfig := bootstrapStack.GetOutput(pulumi.String("common_config"))
+		applyCommonConfig(cfg, commonConfig)
+
 		orgStack, err := pulumi.NewStackReference(ctx, "organization", &pulumi.StackReferenceArgs{
 			Name: pulumi.String(cfg.OrgStackName),
 		})
@@ -91,6 +105,11 @@ type AssuredWorkloadConfig struct {
 // EnvConfig holds all configuration for the environments stage.
 // This mirrors all variables from the upstream Terraform foundation's
 // 2-environments/modules/env_baseline/variables.tf and remote.tf.
+//
+// Core identifiers (org_id, billing_account, project_prefix, folder_prefix,
+// parent_id) are resolved from the bootstrap stage's common_config output
+// via stack reference, matching upstream remote.tf. They can also be
+// overridden via direct config for testing or standalone deployments.
 type EnvConfig struct {
 	// Core identifiers (from bootstrap common_config via stack ref or direct config)
 	OrgID          string
@@ -100,7 +119,8 @@ type EnvConfig struct {
 	Parent         string // "organizations/<id>" or "folders/<id>"
 
 	// Stack references
-	OrgStackName string
+	BootstrapStackName string
+	OrgStackName       string
 
 	// Project settings
 	RandomSuffix             bool
@@ -118,11 +138,16 @@ type EnvConfig struct {
 func loadEnvConfig(ctx *pulumi.Context) *EnvConfig {
 	conf := config.New(ctx, "")
 	c := &EnvConfig{
-		OrgID:          conf.Require("org_id"),
-		BillingAccount: conf.Require("billing_account"),
+		// Core identifiers — these can be overridden via direct config,
+		// but are normally resolved from bootstrap's common_config output.
+		OrgID:          conf.Get("org_id"),
+		BillingAccount: conf.Get("billing_account"),
 		ProjectPrefix:  conf.Get("project_prefix"),
 		FolderPrefix:   conf.Get("folder_prefix"),
-		OrgStackName:   conf.Require("org_stack_name"),
+
+		// Stack references
+		BootstrapStackName: conf.Require("bootstrap_stack_name"),
+		OrgStackName:       conf.Require("org_stack_name"),
 
 		// Project settings
 		ProjectDeletionPolicy: conf.Get("project_deletion_policy"),
@@ -189,13 +214,54 @@ func loadEnvConfig(ctx *pulumi.Context) *EnvConfig {
 		c.AssuredWorkload.ResourceType = "CONSUMER_FOLDER"
 	}
 
-	// Determine parent path
+	// Determine parent path — may be overridden by common_config later
 	parentFolder := conf.Get("parent_folder")
 	if parentFolder != "" {
 		c.Parent = "folders/" + parentFolder
-	} else {
+	} else if c.OrgID != "" {
 		c.Parent = "organizations/" + c.OrgID
 	}
+	// If neither is set, Parent will be resolved from common_config
 
 	return c
+}
+
+// applyCommonConfig merges bootstrap's common_config output into EnvConfig.
+// Only fills in fields that weren't explicitly set via direct config,
+// matching the upstream pattern where remote.tf locals override variables.
+func applyCommonConfig(cfg *EnvConfig, commonConfig pulumi.Output) {
+	commonConfig.ApplyT(func(v interface{}) string {
+		m, ok := v.(map[string]interface{})
+		if !ok {
+			return ""
+		}
+		if cfg.OrgID == "" {
+			if val, exists := m["org_id"]; exists {
+				cfg.OrgID = val.(string)
+			}
+		}
+		if cfg.BillingAccount == "" {
+			if val, exists := m["billing_account"]; exists {
+				cfg.BillingAccount = val.(string)
+			}
+		}
+		if cfg.ProjectPrefix == "" || cfg.ProjectPrefix == "prj" {
+			if val, exists := m["project_prefix"]; exists && val.(string) != "" {
+				cfg.ProjectPrefix = val.(string)
+			}
+		}
+		if cfg.FolderPrefix == "" || cfg.FolderPrefix == "fldr" {
+			if val, exists := m["folder_prefix"]; exists && val.(string) != "" {
+				cfg.FolderPrefix = val.(string)
+			}
+		}
+		if cfg.Parent == "" {
+			if val, exists := m["parent_id"]; exists && val.(string) != "" {
+				cfg.Parent = val.(string)
+			} else if cfg.OrgID != "" {
+				cfg.Parent = "organizations/" + cfg.OrgID
+			}
+		}
+		return ""
+	})
 }

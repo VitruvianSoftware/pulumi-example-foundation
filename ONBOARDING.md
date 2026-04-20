@@ -377,25 +377,26 @@ The environments stage creates per-environment folders, KMS projects, and Secret
 6. Initialize Pulumi stacks for **each environment**:
 
    ```bash
-   # Each environment gets its own stack
+   # Each environment gets its own stack.
+   # Core config (org_id, billing_account, project_prefix, folder_prefix)
+   # is inherited from bootstrap's common_config output via stack reference.
    pulumi stack init development
-   pulumi config set org_id "YOUR_ORG_ID"
-   pulumi config set billing_account "YOUR_BILLING_ACCOUNT"
-   pulumi config set org_stack_name "<PULUMI-ORG>/<PULUMI-PROJECT>/production"
+   pulumi config set bootstrap_stack_name "<PULUMI-ORG>/gcp-bootstrap/production"
+   pulumi config set org_stack_name "<PULUMI-ORG>/gcp-org/production"
 
    pulumi stack init nonproduction
-   pulumi config set org_id "YOUR_ORG_ID"
-   pulumi config set billing_account "YOUR_BILLING_ACCOUNT"
-   pulumi config set org_stack_name "<PULUMI-ORG>/<PULUMI-PROJECT>/production"
+   pulumi config set bootstrap_stack_name "<PULUMI-ORG>/gcp-bootstrap/production"
+   pulumi config set org_stack_name "<PULUMI-ORG>/gcp-org/production"
 
    pulumi stack init production
-   pulumi config set org_id "YOUR_ORG_ID"
-   pulumi config set billing_account "YOUR_BILLING_ACCOUNT"
-   pulumi config set org_stack_name "<PULUMI-ORG>/<PULUMI-PROJECT>/production"
+   pulumi config set bootstrap_stack_name "<PULUMI-ORG>/gcp-bootstrap/production"
+   pulumi config set org_stack_name "<PULUMI-ORG>/gcp-org/production"
    ```
 
-   > **Note**: The `org_stack_name` references the 1-org production stack because
-   > organization resources are shared across all environments.
+   > **Note**: Both stack references point to `production` stacks because bootstrap
+   > and org resources are shared across all environments. Core config (org_id,
+   > billing_account, project_prefix, folder_prefix) is inherited from bootstrap's
+   > `common_config` output — you do not need to re-specify these values.
 
 7. Commit and push:
 
