@@ -51,15 +51,40 @@ logName: /logs/compute.googleapis.com%2Ffirewall OR
 logName: /logs/dns.googleapis.com%2Fdns_queries`
 
 	// ========================================================================
-	// 1. Organization Sink → Logging Project (primary destination)
-	// Logs are sent to a logging bucket with a linked BigQuery dataset
-	// for ad-hoc investigations, querying, and reporting.
+	// 1. Logging Project Bucket (G10)
+	// Create the logging bucket that the org sink writes to. Without this,
+	// the sink destination doesn't exist and logs are silently dropped.
+	// Mirrors: centralized-logging module's project log_bucket_id config.
 	// ========================================================================
-	_, err := logging.NewOrganizationSink(ctx, "org-sink-project", &logging.OrganizationSinkArgs{
+	logProjectBucket, err := logging.NewProjectBucketConfig(ctx, "aggregated-logs-bucket", &logging.ProjectBucketConfigArgs{
+		Project:         auditProjectID,
+		Location:        pulumi.String(cfg.DefaultRegion),
+		BucketId:        pulumi.String("AggregatedLogs"),
+		Description:     pulumi.String("Project destination log bucket for aggregated logs"),
+		EnableAnalytics: pulumi.Bool(true),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Linked BigQuery dataset for log analytics (query logs via SQL)
+	// Mirrors: linked_dataset_id = "ds_c_prj_aggregated_logs_analytics"
+	if _, err := logging.NewLinkedDataset(ctx, "aggregated-logs-dataset", &logging.LinkedDatasetArgs{
+		Parent:      auditProjectID.ApplyT(func(id string) string { return "projects/" + id }).(pulumi.StringOutput),
+		Bucket:      logProjectBucket.ID(),
+		LinkId:      pulumi.String("ds_c_prj_aggregated_logs_analytics"),
+		Location:    pulumi.String(cfg.DefaultRegion),
+		Description: pulumi.String("Project destination BigQuery Dataset for Logbucket analytics"),
+	}); err != nil {
+		return nil, err
+	}
+
+	// 1b. Organization Sink → Logging Project Bucket
+	_, err = logging.NewOrganizationSink(ctx, "org-sink-project", &logging.OrganizationSinkArgs{
 		Name:  pulumi.String("sk-c-logging-prj"),
 		OrgId: pulumi.String(cfg.OrgID),
 		Destination: auditProjectID.ApplyT(func(id string) string {
-			return fmt.Sprintf("logging.googleapis.com/projects/%s/locations/global/buckets/AggregatedLogs", id)
+			return fmt.Sprintf("logging.googleapis.com/projects/%s/locations/%s/buckets/AggregatedLogs", id, cfg.DefaultRegion)
 		}).(pulumi.StringOutput),
 		Filter:          pulumi.String(logFilter),
 		IncludeChildren: pulumi.Bool(true),
@@ -68,9 +93,6 @@ logName: /logs/dns.googleapis.com%2Fdns_queries`
 		return nil, err
 	}
 
-	// Note: GCP automatically handles org-level sink writer permissions for
-	// the project destination. The critical IAM grants are on the storage
-	// and Pub/Sub destinations below.
 
 	// ========================================================================
 	// 2. Organization Sink → Cloud Storage (long-term retention)

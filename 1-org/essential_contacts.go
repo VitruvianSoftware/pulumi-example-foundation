@@ -51,21 +51,45 @@ func deployEssentialContacts(ctx *pulumi.Context, cfg *OrgConfig) error {
 		contactMap[email] = append(contactMap[email], categories...)
 	}
 
-	// Map categories to groups exactly as TF does
-	// BILLING → billing_data_users
+	// Map categories to groups exactly as TF does.
+	// TF's categories_map uses fallbacks to org_admins when optional groups
+	// are not configured. We replicate this behavior here.
+
+	// Resolve group emails with fallbacks (G12)
+	sccAdmin := cfg.GCPSCCAdmin
+	if sccAdmin == "" {
+		sccAdmin = cfg.GroupOrgAdmins // fallback
+	}
+	securityReviewer := cfg.GCPSecurityReviewer
+	if securityReviewer == "" {
+		securityReviewer = cfg.GroupOrgAdmins // fallback
+	}
+	networkViewer := cfg.GCPNetworkViewer
+	if networkViewer == "" {
+		networkViewer = cfg.GroupOrgAdmins // fallback
+	}
+
+	// BILLING → billing_admins + billing_data_users
+	addContact(cfg.GroupBillingAdmins, "BILLING")
 	addContact(cfg.BillingDataUsers, "BILLING")
 
-	// LEGAL → audit_data_users
+	// LEGAL → org_admins + audit_data_users
+	addContact(cfg.GroupOrgAdmins, "LEGAL")
 	addContact(cfg.AuditDataUsers, "LEGAL")
 
-	// SECURITY → scc_admin (falls back to org admins in TF, but we only create if set)
-	addContact(cfg.GCPSCCAdmin, "SECURITY")
+	// PRODUCT_UPDATES → org_admins
+	addContact(cfg.GroupOrgAdmins, "PRODUCT_UPDATES")
 
-	// SECURITY + TECHNICAL → security_reviewer
-	addContact(cfg.GCPSecurityReviewer, "SECURITY", "TECHNICAL")
+	// SECURITY → scc_admin (or org_admins fallback) + security_reviewer (or org_admins fallback)
+	addContact(sccAdmin, "SECURITY")
+	addContact(securityReviewer, "SECURITY")
 
-	// TECHNICAL → network_viewer
-	addContact(cfg.GCPNetworkViewer, "TECHNICAL")
+	// SUSPENSION → org_admins
+	addContact(cfg.GroupOrgAdmins, "SUSPENSION")
+
+	// TECHNICAL → security_reviewer (or org_admins) + network_viewer (or org_admins)
+	addContact(securityReviewer, "TECHNICAL")
+	addContact(networkViewer, "TECHNICAL")
 
 	// De-duplicate categories per contact
 	for email, cats := range contactMap {

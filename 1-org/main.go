@@ -197,6 +197,8 @@ type OrgConfig struct {
 	BootstrapFolderName string // Resolved from StackReference or config
 
 	// Governance groups (from bootstrap required_groups/optional_groups)
+	GroupOrgAdmins        string // email of org admins group
+	GroupBillingAdmins    string // email of billing admins group
 	AuditDataUsers        string
 	BillingDataUsers      string
 	GCPSecurityReviewer   string
@@ -204,6 +206,7 @@ type OrgConfig struct {
 	GCPSCCAdmin           string
 	GCPGlobalSecretsAdmin string
 	GCPKMSAdmin           string
+	GCPAuditViewer        string // G7: separate audit viewer group
 
 	// Domain restrictions
 	DomainsToAllow           []string
@@ -218,6 +221,10 @@ type OrgConfig struct {
 	CreateAccessContextManagerPolicy bool
 	EnforceAllowedWorkerPools        bool
 	EnableHubAndSpoke                bool
+	AllowedWorkerPoolID              string // G1: private worker pool for cloudbuild policy
+
+	// Cross-stage references
+	NetworksSAEmail string // G8: networks pipeline SA email for hub-and-spoke IAM
 
 	// KMS
 	EnableKMSKeyUsageTracking bool
@@ -258,6 +265,8 @@ func loadOrgConfig(ctx *pulumi.Context) *OrgConfig {
 		BootstrapStackName: conf.Require("bootstrap_stack_name"),
 
 		// Governance groups — pulled from bootstrap outputs or overridden locally
+		GroupOrgAdmins:        conf.Get("group_org_admins"),
+		GroupBillingAdmins:    conf.Get("group_billing_admins"),
 		AuditDataUsers:        conf.Get("audit_data_users"),
 		BillingDataUsers:      conf.Get("billing_data_users"),
 		GCPSecurityReviewer:   conf.Get("gcp_security_reviewer"),
@@ -265,6 +274,7 @@ func loadOrgConfig(ctx *pulumi.Context) *OrgConfig {
 		GCPSCCAdmin:           conf.Get("gcp_scc_admin"),
 		GCPGlobalSecretsAdmin: conf.Get("gcp_global_secrets_admin"),
 		GCPKMSAdmin:           conf.Get("gcp_kms_admin"),
+		GCPAuditViewer:        conf.Get("gcp_audit_viewer"),
 
 		// SCC
 		SCCNotificationName:   conf.Get("scc_notification_name"),
@@ -275,6 +285,10 @@ func loadOrgConfig(ctx *pulumi.Context) *OrgConfig {
 		CreateAccessContextManagerPolicy: conf.Get("create_access_context_manager_policy") != "false",
 		EnforceAllowedWorkerPools:        conf.Get("enforce_allowed_worker_pools") == "true",
 		EnableHubAndSpoke:                conf.Get("enable_hub_and_spoke") == "true",
+		AllowedWorkerPoolID:              conf.Get("allowed_worker_pool_id"),
+
+		// Cross-stage references
+		NetworksSAEmail: conf.Get("networks_sa_email"),
 
 		// KMS
 		EnableKMSKeyUsageTracking: conf.Get("enable_kms_key_usage_tracking") != "false",

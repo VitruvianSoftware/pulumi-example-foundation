@@ -126,6 +126,21 @@ func deployOrgPolicies(ctx *pulumi.Context, cfg *OrgConfig) error {
 	}
 
 	// ========================================================================
+	// Allowed Worker Pools (G1)
+	// Restricts Cloud Build to only use the specified private worker pool.
+	// Mirrors: module "allowed_worker_pools" in org_policy.tf
+	// ========================================================================
+	if cfg.EnforceAllowedWorkerPools && cfg.AllowedWorkerPoolID != "" {
+		if _, err := policy.NewOrgPolicy(ctx, "policy-allowed-worker-pools", &policy.OrgPolicyArgs{
+			ParentID:    pulumi.String(parentID),
+			Constraint:  pulumi.String("constraints/cloudbuild.allowedWorkerPools"),
+			AllowValues: pulumi.StringArray{pulumi.String(cfg.AllowedWorkerPoolID)},
+		}); err != nil {
+			return err
+		}
+	}
+
+	// ========================================================================
 	// Access Context Manager
 	// ========================================================================
 	if cfg.CreateAccessContextManagerPolicy {
