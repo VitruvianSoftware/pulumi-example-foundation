@@ -397,13 +397,16 @@ func loadOrgConfig(ctx *pulumi.Context) *OrgConfig {
 		c.DefaultRegion = "us-central1"
 	}
 	if c.SCCNotificationFilter == "" {
-		c.SCCNotificationFilter = "state=\"ACTIVE\""
+		c.SCCNotificationFilter = `state = "ACTIVE"`
 	}
 	if c.SCCNotificationName == "" {
 		c.SCCNotificationName = "scc-notify"
 	}
 	if c.ProjectDeletionPolicy == "" {
 		c.ProjectDeletionPolicy = "PREVENT"
+	}
+	if c.DefaultServiceAccount == "" {
+		c.DefaultServiceAccount = "deprivilege"
 	}
 	if c.EssentialContactsLanguage == "" {
 		c.EssentialContactsLanguage = "en"

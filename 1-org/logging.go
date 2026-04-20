@@ -24,6 +24,7 @@ import (
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/projects"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/pubsub"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/storage"
+	"github.com/pulumi/pulumi-random/sdk/v4/go/random"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )
 
@@ -63,6 +64,16 @@ logName: /logs/dns.googleapis.com%2Fdns_queries`
 
 	// Track the last resource created for dependency ordering
 	var lastResource pulumi.Resource
+
+	// Random suffix for globally-unique resource names (matches upstream random_string.suffix)
+	suffix, err := random.NewRandomString(ctx, "log-suffix", &random.RandomStringArgs{
+		Length:  pulumi.Int(4),
+		Upper:   pulumi.Bool(false),
+		Special: pulumi.Bool(false),
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	// ========================================================================
 	// 1. Logging Project Bucket (G10)
@@ -114,8 +125,10 @@ logName: /logs/dns.googleapis.com%2Fdns_queries`
 	// ========================================================================
 	logBucket, err := storage.NewBucket(ctx, "org-log-storage", &storage.BucketArgs{
 		Project: auditProjectID,
-		Name: auditProjectID.ApplyT(func(id string) string {
-			return fmt.Sprintf("bkt-%s-org-logs", id)
+		Name: pulumi.All(auditProjectID, suffix.Result).ApplyT(func(args []interface{}) string {
+			id := args[0].(string)
+			s := args[1].(string)
+			return fmt.Sprintf("bkt-%s-org-logs-%s", id, s)
 		}).(pulumi.StringOutput),
 		Location:                 pulumi.String(cfg.LogExportStorageLocation),
 		UniformBucketLevelAccess: pulumi.Bool(true),
@@ -156,7 +169,9 @@ logName: /logs/dns.googleapis.com%2Fdns_queries`
 	// ========================================================================
 	logTopic, err := pubsub.NewTopic(ctx, "org-log-topic", &pubsub.TopicArgs{
 		Project: auditProjectID,
-		Name:    pulumi.String("tp-org-logs"),
+		Name: suffix.Result.ApplyT(func(s string) string {
+			return fmt.Sprintf("tp-org-logs-%s", s)
+		}).(pulumi.StringOutput),
 	})
 	if err != nil {
 		return nil, err
