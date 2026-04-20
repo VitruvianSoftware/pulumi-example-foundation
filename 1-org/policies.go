@@ -27,7 +27,12 @@ import (
 // deployOrgPolicies enforces organization-level security policies.
 // This mirrors the Terraform foundation's org_policy.tf, applying 14+ boolean
 // constraints and list constraints that form the security baseline.
-func deployOrgPolicies(ctx *pulumi.Context, cfg *OrgConfig) error {
+//
+// The loggingDeps parameter implements the Gap 3 race condition guard: the
+// domain-restricted sharing policy must wait for log sinks to be created and
+// their writer identities granted IAM, otherwise the sinks may fail with 403.
+// The upstream uses a time_sleep of 30s; in Pulumi we use explicit DependsOn.
+func deployOrgPolicies(ctx *pulumi.Context, cfg *OrgConfig, loggingDeps []pulumi.Resource) error {
 	parentID := "organizations/" + cfg.OrgID
 	if cfg.ParentFolder != "" {
 		parentID = "folders/" + cfg.ParentFolder
@@ -92,16 +97,24 @@ func deployOrgPolicies(ctx *pulumi.Context, cfg *OrgConfig) error {
 	}
 
 	// Domain-restricted sharing — only allow specified domains
+	// Gap 3 fix: this policy must wait for log sinks to finish deploying.
+	// The upstream uses time_sleep "wait_logs_export" with create_duration = 30s
+	// and depends_on = [module.logs_export]. In Pulumi we use explicit DependsOn
+	// on the logging resources to establish the ordering guarantee.
 	if len(cfg.DomainsToAllow) > 0 {
 		domainValues := make(pulumi.StringArray, len(cfg.DomainsToAllow))
 		for i, d := range cfg.DomainsToAllow {
 			domainValues[i] = pulumi.String(d)
 		}
+		var policyOpts []pulumi.ResourceOption
+		if len(loggingDeps) > 0 {
+			policyOpts = append(policyOpts, pulumi.DependsOn(loggingDeps))
+		}
 		if _, err := policy.NewOrgPolicy(ctx, "policy-domain-restricted-sharing", &policy.OrgPolicyArgs{
 			ParentID:    pulumi.String(parentID),
 			Constraint:  pulumi.String("constraints/iam.allowedPolicyMemberDomains"),
 			AllowValues: domainValues,
-		}); err != nil {
+		}, policyOpts...); err != nil {
 			return err
 		}
 	}

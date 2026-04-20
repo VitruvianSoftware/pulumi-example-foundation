@@ -203,14 +203,30 @@ func deployOrgIAM(ctx *pulumi.Context, cfg *OrgConfig, proj *OrgProjects) error 
 	// org level when KMS key usage tracking is enabled. This allows KMS to
 	// track key usage across all projects in the organization.
 	// Mirrors: google_organization_iam_member "kms_usage_tracking" in iam.tf
+	//
+	// Gap 4 fix: Pre-create the KMS service agent identity before granting
+	// the IAM binding — upstream uses gcloud beta services identity create.
+	// Without this, the SA may not exist and the IAM binding references a
+	// phantom principal.
 	// ========================================================================
 	if cfg.EnableKMSKeyUsageTracking {
+		// Ensure the KMS organization service agent exists before granting it IAM.
+		// This is the Pulumi equivalent of the upstream's:
+		//   gcloud beta services identity create --service cloudkms.googleapis.com --organization ${org_id}
+		kmsIdentity, err := projects.NewServiceIdentity(ctx, "kms-service-identity", &projects.ServiceIdentityArgs{
+			Service: pulumi.String("cloudkms.googleapis.com"),
+			Project: proj.OrgKMSProjectID,
+		})
+		if err != nil {
+			return err
+		}
+
 		kmsServiceAgent := fmt.Sprintf("serviceAccount:service-org-%s@gcp-sa-cloudkms.iam.gserviceaccount.com", cfg.OrgID)
 		if _, err := organizations.NewIAMMember(ctx, "kms-usage-tracking", &organizations.IAMMemberArgs{
 			OrgId:  pulumi.String(cfg.OrgID),
 			Role:   pulumi.String("roles/cloudkms.orgServiceAgent"),
 			Member: pulumi.String(kmsServiceAgent),
-		}); err != nil {
+		}, pulumi.DependsOn([]pulumi.Resource{kmsIdentity})); err != nil {
 			return err
 		}
 	}

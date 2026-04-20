@@ -67,20 +67,33 @@ func main() {
 			return err
 		}
 
-		// 4. Deploy Organization Policies (14+ boolean + list)
-		if err := deployOrgPolicies(ctx, cfg); err != nil {
+		// 4. Deploy Centralized Logging (org sinks → Storage, Pub/Sub, BigQuery)
+		// Must run BEFORE policies so domain-restricted sharing waits for sinks (Gap 3)
+		logOutputs, err := deployCentralizedLogging(ctx, cfg, projOutputs.AuditLogsProjectID, projOutputs.BillingExportProjectID)
+		if err != nil {
 			return err
 		}
 
-		// 5. Deploy Centralized Logging (org sinks → Storage, Pub/Sub, BigQuery)
-		logOutputs, err := deployCentralizedLogging(ctx, cfg, projOutputs.AuditLogsProjectID, projOutputs.BillingExportProjectID)
-		if err != nil {
+		// 5. Deploy Organization Policies (14+ boolean + list)
+		// The domain-restricted sharing policy depends on log sinks via loggingDeps
+		var loggingDeps []pulumi.Resource
+		if logOutputs.LastResource != nil {
+			loggingDeps = append(loggingDeps, logOutputs.LastResource)
+		}
+		if err := deployOrgPolicies(ctx, cfg, loggingDeps); err != nil {
 			return err
 		}
 
 		// 6. Deploy SCC Notifications
 		if cfg.EnableSCCResources {
 			if err := deploySCCNotification(ctx, cfg, projOutputs.SCCProjectID); err != nil {
+				return err
+			}
+		}
+
+		// 6b. Deploy CAI Monitoring infrastructure (Gap 2)
+		if cfg.EnableSCCResources {
+			if err := deployCAIMonitoring(ctx, cfg, projOutputs.SCCProjectID); err != nil {
 				return err
 			}
 		}
@@ -157,25 +170,34 @@ type RetentionPolicy struct {
 
 // ProjectBudgetConfig mirrors the TF foundation's project_budget variable (H2).
 // Each field controls budget amounts and alerting per project.
-// Amount defaults to 1000, AlertSpentPercents defaults to [1.2].
+// Amount defaults to 1000, AlertSpentPercents defaults to [1.2],
+// AlertSpendBasis defaults to "FORECASTED_SPEND".
 type ProjectBudgetConfig struct {
 	// Per-project budget amounts (in billing account currency, e.g. USD)
-	OrgLoggingBudgetAmount     float64
-	OrgBillingExportAmount     float64
-	OrgSCCBudgetAmount         float64
-	OrgKMSBudgetAmount         float64
-	OrgSecretsBudgetAmount     float64
-	OrgDNSHubBudgetAmount      float64
+	OrgLoggingBudgetAmount      float64
+	OrgBillingExportAmount      float64
+	OrgSCCBudgetAmount          float64
+	OrgKMSBudgetAmount          float64
+	OrgSecretsBudgetAmount      float64
+	OrgDNSHubBudgetAmount       float64
 	OrgInterconnectBudgetAmount float64
-	OrgNetHubBudgetAmount      float64
+	OrgNetHubBudgetAmount       float64
+
+	// Per-environment shared network budget
+	SharedNetworkBudgetAmount float64
 
 	// Shared alert thresholds (defaults: [1.2])
 	AlertSpentPercents []float64
 
+	// AlertSpendBasis is the type of basis: "CURRENT_SPEND" or "FORECASTED_SPEND".
+	// Defaults to "FORECASTED_SPEND" matching upstream.
+	AlertSpendBasis string
+
 	// Optional per-project Pub/Sub topics for budget notifications
-	OrgLoggingAlertPubSubTopic     string
-	OrgSCCAlertPubSubTopic         string
-	OrgNetHubAlertPubSubTopic      string
+	OrgLoggingAlertPubSubTopic       string
+	OrgSCCAlertPubSubTopic           string
+	OrgNetHubAlertPubSubTopic        string
+	SharedNetworkAlertPubSubTopic    string
 }
 
 // OrgConfig holds all configuration for the organization stage.
@@ -239,10 +261,13 @@ type OrgConfig struct {
 	ProjectBudget *ProjectBudgetConfig
 
 	// Logging — storage options (H6, H7, H8)
-	LogExportStorageLocation       string
-	LogExportStorageForceDestroy   bool
-	LogExportStorageVersioning     bool
+	LogExportStorageLocation        string
+	LogExportStorageForceDestroy    bool
+	LogExportStorageVersioning      bool
 	LogExportStorageRetentionPolicy *RetentionPolicy
+
+	// Logging — billing account sink (matches upstream enable_billing_account_sink)
+	EnableBillingAccountSink bool
 
 	// Logging — billing export
 	BillingExportDatasetLocation string
@@ -279,7 +304,8 @@ func loadOrgConfig(ctx *pulumi.Context) *OrgConfig {
 		// SCC
 		SCCNotificationName:   conf.Get("scc_notification_name"),
 		SCCNotificationFilter: conf.Get("scc_notification_filter"),
-		EnableSCCResources:    conf.Get("enable_scc_resources") != "false",
+		EnableSCCResources:       conf.Get("enable_scc_resources") != "false",
+		EnableBillingAccountSink: conf.Get("enable_billing_account_sink") != "false",
 
 		// Policies
 		CreateAccessContextManagerPolicy: conf.Get("create_access_context_manager_policy") != "false",
