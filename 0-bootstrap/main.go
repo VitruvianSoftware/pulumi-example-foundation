@@ -38,7 +38,7 @@ func main() {
 		bootstrapFolder, err := organizations.NewFolder(ctx, "bootstrap-folder", &organizations.FolderArgs{
 			DisplayName:        pulumi.String(cfg.FolderPrefix + "-bootstrap"),
 			Parent:             pulumi.String(cfg.Parent),
-			DeletionProtection: pulumi.Bool(true),
+			DeletionProtection: pulumi.Bool(cfg.FolderDeletionProtection),
 		}, pulumi.Protect(true))
 		if err != nil {
 			return err
@@ -78,6 +78,7 @@ func main() {
 		ctx.Export("seed_project_id", seed.ProjectID)
 		ctx.Export("cicd_project_id", cicd.ProjectID)
 		ctx.Export("bootstrap_folder_id", bootstrapFolder.ID())
+		ctx.Export("bootstrap_folder_name", bootstrapFolder.Name)
 		ctx.Export("tf_state_bucket", seed.StateBucketName)
 		ctx.Export("state_bucket_kms_key_id", seed.KMSKeyID)
 		for key, sa := range sas {
@@ -145,6 +146,8 @@ type Config struct {
 	OrgPolicyAdminRole bool
 	BucketForceDestroy bool
 	RandomSuffix       bool // Append random hex suffix to project IDs (default: true)
+	ProjectDeletionPolicy    string // "PREVENT" or "DELETE" (default: "PREVENT")
+	FolderDeletionProtection bool   // Prevent Terraform from destroying the folder (default: true)
 
 	// Groups — required for org admin and billing workflows
 	GroupOrgAdmins     string
@@ -189,9 +192,10 @@ func loadConfig(ctx *pulumi.Context) *Config {
 		DefaultRegion:      conf.Get("default_region"),
 		DefaultRegion2:     conf.Get("default_region_2"),
 		DefaultRegionGCS:   conf.Get("default_region_gcs"),
-		DefaultRegionKMS:     conf.Get("default_region_kms"),
+		DefaultRegionKMS:      conf.Get("default_region_kms"),
 		KMSKeyProtectionLevel: conf.Get("kms_key_protection_level"),
-		ParentFolder:         conf.Get("parent_folder"),
+		ProjectDeletionPolicy: conf.Get("project_deletion_policy"),
+		ParentFolder:          conf.Get("parent_folder"),
 		GroupOrgAdmins:     conf.Require("group_org_admins"),
 		GroupBillingAdmins: conf.Require("group_billing_admins"),
 		BillingDataUsers:   conf.Require("billing_data_users"),
@@ -214,6 +218,7 @@ func loadConfig(ctx *pulumi.Context) *Config {
 
 	c.OrgPolicyAdminRole = conf.Get("org_policy_admin_role") == "true"
 	c.BucketForceDestroy = conf.Get("bucket_force_destroy") == "true"
+	c.FolderDeletionProtection = conf.Get("folder_deletion_protection") != "false"
 	c.CreateRequiredGroups = conf.Get("create_required_groups") == "true"
 	c.CreateOptionalGroups = conf.Get("create_optional_groups") == "true"
 	c.InitialGroupConfig = conf.Get("initial_group_config")
@@ -235,6 +240,9 @@ func loadConfig(ctx *pulumi.Context) *Config {
 	}
 	if c.BucketPrefix == "" {
 		c.BucketPrefix = "bkt"
+	}
+	if c.ProjectDeletionPolicy == "" {
+		c.ProjectDeletionPolicy = "PREVENT"
 	}
 	if c.DefaultRegion == "" {
 		c.DefaultRegion = "us-central1"
