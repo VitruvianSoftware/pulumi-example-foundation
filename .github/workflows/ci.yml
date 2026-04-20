@@ -15,9 +15,14 @@
 # Repository CI — validates the reference foundation codebase itself.
 #
 # This is NOT the deployment pipeline. The deployment pipeline templates
-# (pulumi preview/up against environment branches) live in build/ and
-# are copied into the operator's repositories during onboarding.
+# (pulumi preview on PRs, pulumi up on merges) live in build/ and
+# are copied into the operator's per-stage repositories during onboarding.
 # See ONBOARDING.md for details.
+#
+# Templates:
+#   build/pulumi-preview.yml  — runs pulumi preview on PRs
+#   build/pulumi-up.yml       — runs pulumi up on merges
+
 
 name: CI
 
