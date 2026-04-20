@@ -135,10 +135,10 @@ func main() {
 		}
 
 		// Projects
-		ctx.Export("audit_logs_project_id", projOutputs.AuditLogsProjectID)
-		ctx.Export("billing_export_project_id", projOutputs.BillingExportProjectID)
-		ctx.Export("scc_project_id", projOutputs.SCCProjectID)
-		ctx.Export("org_kms_project_id", projOutputs.OrgKMSProjectID)
+		ctx.Export("org_audit_logs_project_id", projOutputs.AuditLogsProjectID)
+		ctx.Export("org_billing_export_project_id", projOutputs.BillingExportProjectID)
+		ctx.Export("scc_notifications_project_id", projOutputs.SCCProjectID)
+		ctx.Export("common_kms_project_id", projOutputs.OrgKMSProjectID)
 		ctx.Export("org_secrets_project_id", projOutputs.OrgSecretsProjectID)
 		ctx.Export("interconnect_project_id", projOutputs.InterconnectProjectID)
 		ctx.Export("interconnect_project_number", projOutputs.InterconnectProjectNumber)
