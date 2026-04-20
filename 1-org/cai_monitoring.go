@@ -41,6 +41,16 @@ var caiRolesToMonitor = []string{
 	"roles/iam.serviceAccountTokenCreator",
 }
 
+// CAIMonitoringOutputs holds resource names for downstream exports.
+// Mirrors upstream outputs: cai_monitoring_artifact_registry, cai_monitoring_asset_feed,
+// cai_monitoring_bucket, cai_monitoring_topic.
+type CAIMonitoringOutputs struct {
+	ArtifactRegistryName pulumi.StringOutput
+	AssetFeedName        pulumi.StringOutput
+	BucketName           pulumi.StringOutput
+	TopicName            pulumi.StringOutput
+}
+
 // deployCAIMonitoring deploys the Cloud Asset Inventory monitoring
 // infrastructure. This mirrors the upstream Terraform foundation's
 // 1-org/modules/cai-monitoring module.
@@ -59,7 +69,7 @@ var caiRolesToMonitor = []string{
 //   - Pub/Sub topic and Cloud Asset Organization Feed
 //   - SCC v2 Organization Source for findings
 //   - Cloud Function v2 triggered by Pub/Sub
-func deployCAIMonitoring(ctx *pulumi.Context, cfg *OrgConfig, sccProjectID pulumi.StringOutput) error {
+func deployCAIMonitoring(ctx *pulumi.Context, cfg *OrgConfig, sccProjectID pulumi.StringOutput) (*CAIMonitoringOutputs, error) {
 	// ========================================================================
 	// 1. Cloud Function Service Account
 	// This SA runs the CAI monitoring function and needs:
@@ -73,7 +83,7 @@ func deployCAIMonitoring(ctx *pulumi.Context, cfg *OrgConfig, sccProjectID pulum
 		Description: pulumi.String("Service account for CAI monitoring Cloud Function"),
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Org-level: SCC findings editor so the function can create findings
@@ -87,7 +97,7 @@ func deployCAIMonitoring(ctx *pulumi.Context, cfg *OrgConfig, sccProjectID pulum
 		Member: caiSAMember,
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Project-level: roles for Pub/Sub, Eventarc, and Cloud Run
@@ -104,7 +114,7 @@ func deployCAIMonitoring(ctx *pulumi.Context, cfg *OrgConfig, sccProjectID pulum
 			Member:  caiSAMember,
 		})
 		if err != nil {
-			return err
+			return nil, err
 		}
 		cfIAMResources = append(cfIAMResources, iam)
 	}
@@ -125,7 +135,7 @@ func deployCAIMonitoring(ctx *pulumi.Context, cfg *OrgConfig, sccProjectID pulum
 			Project: sccProjectID,
 			Service: pulumi.String(svc),
 		}); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
@@ -142,7 +152,7 @@ func deployCAIMonitoring(ctx *pulumi.Context, cfg *OrgConfig, sccProjectID pulum
 		Format:       pulumi.String("DOCKER"),
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// ========================================================================
@@ -161,7 +171,7 @@ func deployCAIMonitoring(ctx *pulumi.Context, cfg *OrgConfig, sccProjectID pulum
 		UniformBucketLevelAccess: pulumi.Bool(true),
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Upload the function source code as a zip archive.
@@ -173,7 +183,7 @@ func deployCAIMonitoring(ctx *pulumi.Context, cfg *OrgConfig, sccProjectID pulum
 		Source: pulumi.NewFileArchive("./cai-monitoring-function"),
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// ========================================================================
@@ -188,10 +198,10 @@ func deployCAIMonitoring(ctx *pulumi.Context, cfg *OrgConfig, sccProjectID pulum
 		Name:    pulumi.String("top-cai-monitoring-event"),
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	if _, err := cloudasset.NewOrganizationFeed(ctx, "cai-org-feed", &cloudasset.OrganizationFeedArgs{
+	caiFeed, err := cloudasset.NewOrganizationFeed(ctx, "cai-org-feed", &cloudasset.OrganizationFeedArgs{
 		FeedId:         pulumi.String("fd-cai-monitoring"),
 		BillingProject: sccProjectID,
 		OrgId:          pulumi.String(cfg.OrgID),
@@ -202,8 +212,9 @@ func deployCAIMonitoring(ctx *pulumi.Context, cfg *OrgConfig, sccProjectID pulum
 				Topic: caiTopic.ID(),
 			},
 		},
-	}); err != nil {
-		return err
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	// ========================================================================
@@ -218,7 +229,7 @@ func deployCAIMonitoring(ctx *pulumi.Context, cfg *OrgConfig, sccProjectID pulum
 		Description:  pulumi.String("SCC Finding Source for caiMonitoring Cloud Functions."),
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// ========================================================================
@@ -280,8 +291,13 @@ func deployCAIMonitoring(ctx *pulumi.Context, cfg *OrgConfig, sccProjectID pulum
 			ServiceAccountEmail: caiSA.Email,
 		},
 	}, pulumi.DependsOn(cfIAMResources)); err != nil {
-		return err
+		return nil, err
 	}
 
-	return nil
+	return &CAIMonitoringOutputs{
+		ArtifactRegistryName: arRepo.Name,
+		AssetFeedName:        caiFeed.Name,
+		BucketName:           sourceBucket.Name,
+		TopicName:            caiTopic.Name,
+	}, nil
 }

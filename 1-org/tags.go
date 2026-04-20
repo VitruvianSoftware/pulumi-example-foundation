@@ -33,10 +33,10 @@ import (
 // When CreateUniqueTagKey is true (recommended for parent folder deployments),
 // a random suffix is appended to tag key names to avoid org-wide conflicts.
 func deployTags(ctx *pulumi.Context, cfg *OrgConfig, folders *Folders) (pulumi.MapOutput, error) {
+	// Tag keys are always created at the organization level, even when
+	// deploying under a parent_folder. Matches upstream tags.tf which uses
+	// "organizations/${local.org_id}" unconditionally.
 	parent := "organizations/" + cfg.OrgID
-	if cfg.ParentFolder != "" {
-		parent = "folders/" + cfg.ParentFolder
-	}
 
 	// Optional random suffix for unique tag keys (H14 / create_unique_tag_key)
 	var keySuffix pulumi.StringInput = pulumi.String("environment")
