@@ -142,6 +142,7 @@ func deployCICDProject(ctx *pulumi.Context, cfg *Config, folderID pulumi.StringO
 			"compute.googleapis.com",
 			"logging.googleapis.com",
 			"iam.googleapis.com",
+			"iamcredentials.googleapis.com",
 			"admin.googleapis.com",
 			"artifactregistry.googleapis.com",
 			"cloudbuild.googleapis.com",
