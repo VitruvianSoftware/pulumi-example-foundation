@@ -34,6 +34,7 @@ type EnvBaselineOutputs struct {
 	KMSProjectNumber pulumi.StringOutput
 	SecretsProjectID pulumi.StringOutput
 	AssuredWorkloadID pulumi.StringOutput
+	AssuredWorkloadResources assuredworkloads.WorkloadResourceArrayOutput
 }
 
 // deployEnvBaseline creates all per-environment resources for a single environment.
@@ -194,6 +195,7 @@ func deployEnvBaseline(ctx *pulumi.Context, cfg *EnvConfig, env, envCode string,
 		outputs.AssuredWorkloadID = workload.ID().ApplyT(func(id pulumi.ID) string {
 			return string(id)
 		}).(pulumi.StringOutput)
+		outputs.AssuredWorkloadResources = workload.Resources
 	}
 
 	return outputs, nil

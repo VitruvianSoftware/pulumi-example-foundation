@@ -378,25 +378,27 @@ The environments stage creates per-environment folders, KMS projects, and Secret
 
    ```bash
    # Each environment gets its own stack.
-   # Core config (org_id, billing_account, project_prefix, folder_prefix)
-   # is inherited from bootstrap's common_config output via stack reference.
    pulumi stack init development
-   pulumi config set bootstrap_stack_name "<PULUMI-ORG>/gcp-bootstrap/production"
+   pulumi config set org_id "YOUR_ORG_ID"
+   pulumi config set billing_account "YOUR_BILLING_ACCOUNT"
    pulumi config set org_stack_name "<PULUMI-ORG>/gcp-org/production"
 
    pulumi stack init nonproduction
-   pulumi config set bootstrap_stack_name "<PULUMI-ORG>/gcp-bootstrap/production"
+   pulumi config set org_id "YOUR_ORG_ID"
+   pulumi config set billing_account "YOUR_BILLING_ACCOUNT"
    pulumi config set org_stack_name "<PULUMI-ORG>/gcp-org/production"
 
    pulumi stack init production
-   pulumi config set bootstrap_stack_name "<PULUMI-ORG>/gcp-bootstrap/production"
+   pulumi config set org_id "YOUR_ORG_ID"
+   pulumi config set billing_account "YOUR_BILLING_ACCOUNT"
    pulumi config set org_stack_name "<PULUMI-ORG>/gcp-org/production"
    ```
 
-   > **Note**: Both stack references point to `production` stacks because bootstrap
-   > and org resources are shared across all environments. Core config (org_id,
-   > billing_account, project_prefix, folder_prefix) is inherited from bootstrap's
-   > `common_config` output — you do not need to re-specify these values.
+   > **Note**: The `org_stack_name` references the 1-org production stack because
+   > organization resources (tags, folders) are shared across all environments.
+   > Unlike Terraform's `terraform_remote_state` which blocks during plan/apply,
+   > Pulumi stack references return async Outputs — so core identifiers like
+   > `org_id` and `billing_account` must be set as direct config per stack.
 
 7. Commit and push:
 
