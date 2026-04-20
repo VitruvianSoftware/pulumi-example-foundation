@@ -19,7 +19,6 @@ package main
 import (
 	"fmt"
 
-	"github.com/VitruvianSoftware/pulumi-library/pkg/project"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi/config"
 )
@@ -28,7 +27,7 @@ func main() {
 	pulumi.Run(func(ctx *pulumi.Context) error {
 		cfg := loadEnvConfig(ctx)
 
-		// 1. Stack Reference to Organization stage
+		// 1. Stack References — resolve outputs from 0-bootstrap and 1-org
 		orgStack, err := pulumi.NewStackReference(ctx, "organization", &pulumi.StackReferenceArgs{
 			Name: pulumi.String(cfg.OrgStackName),
 		})
@@ -36,63 +35,84 @@ func main() {
 			return err
 		}
 
-		// 2. For each environment, create per-env KMS and Secrets projects
-		// under the environment folders created in Stage 1.
+		// Resolve tag values from the 1-org stage for folder tag bindings.
+		// The 1-org stage exports a "tags" map with keys like "environment_development".
+		tagsOutput := orgStack.GetOutput(pulumi.String("tags"))
+
+		// 2. Deploy per-environment baselines
 		envCodes := map[string]string{"development": "d", "nonproduction": "n", "production": "p"}
 
 		for env, code := range envCodes {
-			// Resolve the environment folder ID from the Org stage outputs
-			folderID := orgStack.GetStringOutput(pulumi.String(fmt.Sprintf("%s_folder_id", env)))
-
-			// KMS Project — environment-level key management
-			kmsProject, err := project.NewProject(ctx, fmt.Sprintf("env-kms-%s", env), &project.ProjectArgs{
-				ProjectID:       pulumi.String(fmt.Sprintf("%s-%s-kms", cfg.ProjectPrefix, code)),
-				Name:            pulumi.String(fmt.Sprintf("%s-%s-kms", cfg.ProjectPrefix, code)),
-				FolderID:        folderID,
-				BillingAccount:  pulumi.String(cfg.BillingAccount),
-				RandomProjectID: cfg.RandomSuffix,
-				ActivateApis: []string{
-					"cloudkms.googleapis.com",
-					"billingbudgets.googleapis.com",
-				},
-			})
+			outputs, err := deployEnvBaseline(ctx, cfg, env, code, tagsOutput)
 			if err != nil {
 				return err
 			}
 
-			// Secrets Project — environment-level secret storage
-			secretsProject, err := project.NewProject(ctx, fmt.Sprintf("env-secrets-%s", env), &project.ProjectArgs{
-				ProjectID:       pulumi.String(fmt.Sprintf("%s-%s-secrets", cfg.ProjectPrefix, code)),
-				Name:            pulumi.String(fmt.Sprintf("%s-%s-secrets", cfg.ProjectPrefix, code)),
-				FolderID:        folderID,
-				BillingAccount:  pulumi.String(cfg.BillingAccount),
-				RandomProjectID: cfg.RandomSuffix,
-				ActivateApis: []string{
-					"secretmanager.googleapis.com",
-					"billingbudgets.googleapis.com",
-				},
-			})
-			if err != nil {
-				return err
-			}
+			// Exports — matches upstream per-env outputs
+			ctx.Export(fmt.Sprintf("%s_env_folder", env), outputs.FolderName)
+			ctx.Export(fmt.Sprintf("%s_env_folder_id", env), outputs.FolderID)
+			ctx.Export(fmt.Sprintf("%s_env_kms_project_id", env), outputs.KMSProjectID)
+			ctx.Export(fmt.Sprintf("%s_env_kms_project_number", env), outputs.KMSProjectNumber)
+			ctx.Export(fmt.Sprintf("%s_env_secrets_project_id", env), outputs.SecretsProjectID)
 
-			// Exports
-			ctx.Export(fmt.Sprintf("%s_kms_project_id", env), kmsProject.Project.ProjectId)
-			ctx.Export(fmt.Sprintf("%s_secrets_project_id", env), secretsProject.Project.ProjectId)
-			ctx.Export(fmt.Sprintf("%s_folder_id", env), folderID)
+			// Assured Workload outputs (only when enabled)
+			if cfg.AssuredWorkload.Enabled {
+				ctx.Export(fmt.Sprintf("%s_assured_workload_id", env), outputs.AssuredWorkloadID)
+			}
 		}
 
 		return nil
 	})
 }
 
-// EnvConfig holds configuration for the environments stage.
+// PerProjectBudget holds the budget configuration for a single project.
+type PerProjectBudget struct {
+	Amount             float64
+	AlertSpentPercents []float64
+	AlertPubSubTopic   string
+	AlertSpendBasis    string
+}
+
+// EnvProjectBudgetConfig mirrors the upstream project_budget variable for 2-environments.
+type EnvProjectBudgetConfig struct {
+	KMS    PerProjectBudget
+	Secret PerProjectBudget
+}
+
+// AssuredWorkloadConfig mirrors the upstream assured_workload_configuration variable.
+type AssuredWorkloadConfig struct {
+	Enabled          bool
+	Location         string
+	DisplayName      string
+	ComplianceRegime string
+	ResourceType     string
+}
+
+// EnvConfig holds all configuration for the environments stage.
+// This mirrors all variables from the upstream Terraform foundation's
+// 2-environments/modules/env_baseline/variables.tf and remote.tf.
 type EnvConfig struct {
+	// Core identifiers (from bootstrap common_config via stack ref or direct config)
 	OrgID          string
 	BillingAccount string
 	ProjectPrefix  string
-	OrgStackName   string
-	RandomSuffix   bool
+	FolderPrefix   string
+	Parent         string // "organizations/<id>" or "folders/<id>"
+
+	// Stack references
+	OrgStackName string
+
+	// Project settings
+	RandomSuffix             bool
+	ProjectDeletionPolicy    string
+	FolderDeletionProtection bool
+	DefaultServiceAccount    string
+
+	// Budgets
+	ProjectBudget *EnvProjectBudgetConfig
+
+	// Assured Workloads
+	AssuredWorkload AssuredWorkloadConfig
 }
 
 func loadEnvConfig(ctx *pulumi.Context) *EnvConfig {
@@ -101,12 +121,81 @@ func loadEnvConfig(ctx *pulumi.Context) *EnvConfig {
 		OrgID:          conf.Require("org_id"),
 		BillingAccount: conf.Require("billing_account"),
 		ProjectPrefix:  conf.Get("project_prefix"),
+		FolderPrefix:   conf.Get("folder_prefix"),
 		OrgStackName:   conf.Require("org_stack_name"),
+
+		// Project settings
+		ProjectDeletionPolicy: conf.Get("project_deletion_policy"),
+		DefaultServiceAccount: conf.Get("default_service_account"),
 	}
+
+	// Boolean config with defaults
+	c.FolderDeletionProtection = conf.Get("folder_deletion_protection") != "false"
+	randomSuffix := conf.Get("random_suffix")
+	c.RandomSuffix = randomSuffix != "false"
+
+	// Parse structured config for ProjectBudget
+	var pb EnvProjectBudgetConfig
+	if err := conf.GetObject("project_budget", &pb); err == nil {
+		c.ProjectBudget = &pb
+	} else {
+		// Default budget values matching upstream tf variables.tf
+		c.ProjectBudget = &EnvProjectBudgetConfig{
+			KMS: PerProjectBudget{
+				Amount:             1000,
+				AlertSpentPercents: []float64{1.2},
+				AlertSpendBasis:    "FORECASTED_SPEND",
+			},
+			Secret: PerProjectBudget{
+				Amount:             1000,
+				AlertSpentPercents: []float64{1.2},
+				AlertSpendBasis:    "FORECASTED_SPEND",
+			},
+		}
+	}
+
+	// Parse Assured Workload configuration
+	c.AssuredWorkload = AssuredWorkloadConfig{
+		Enabled:          conf.Get("assured_workload_enabled") == "true",
+		Location:         conf.Get("assured_workload_location"),
+		DisplayName:      conf.Get("assured_workload_display_name"),
+		ComplianceRegime: conf.Get("assured_workload_compliance_regime"),
+		ResourceType:     conf.Get("assured_workload_resource_type"),
+	}
+
+	// Apply defaults matching the upstream Terraform foundation
 	if c.ProjectPrefix == "" {
 		c.ProjectPrefix = "prj"
 	}
-	randomSuffix := conf.Get("random_suffix")
-	c.RandomSuffix = randomSuffix != "false"
+	if c.FolderPrefix == "" {
+		c.FolderPrefix = "fldr"
+	}
+	if c.ProjectDeletionPolicy == "" {
+		c.ProjectDeletionPolicy = "PREVENT"
+	}
+	if c.DefaultServiceAccount == "" {
+		c.DefaultServiceAccount = "deprivilege"
+	}
+	if c.AssuredWorkload.Location == "" {
+		c.AssuredWorkload.Location = "us-central1"
+	}
+	if c.AssuredWorkload.DisplayName == "" {
+		c.AssuredWorkload.DisplayName = "FEDRAMP-MODERATE"
+	}
+	if c.AssuredWorkload.ComplianceRegime == "" {
+		c.AssuredWorkload.ComplianceRegime = "FEDRAMP_MODERATE"
+	}
+	if c.AssuredWorkload.ResourceType == "" {
+		c.AssuredWorkload.ResourceType = "CONSUMER_FOLDER"
+	}
+
+	// Determine parent path
+	parentFolder := conf.Get("parent_folder")
+	if parentFolder != "" {
+		c.Parent = "folders/" + parentFolder
+	} else {
+		c.Parent = "organizations/" + c.OrgID
+	}
+
 	return c
 }
