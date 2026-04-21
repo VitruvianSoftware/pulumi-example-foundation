@@ -175,6 +175,11 @@ The bootstrap stage creates the Seed project (state storage, KMS encryption, ser
    pulumi config set github_repo_env "gcp-environments"
    pulumi config set github_repo_net "gcp-networks"
    pulumi config set github_repo_proj "gcp-projects"
+
+   # GitHub token for auto-provisioning secrets into stage repos.
+   # This requires a PAT (or fine-grained token) with repo:write and
+   # admin:org scope. The token is stored encrypted in Pulumi state.
+   pulumi config set --secret github:token "ghp_your_token_here"
    ```
 
    **Key settings** (see `main.go` for the full list):
@@ -199,14 +204,20 @@ The bootstrap stage creates the Seed project (state storage, KMS encryption, ser
     echo "WIF Provider  = ${WIF_PROVIDER}"
     ```
 
-11. Configure GitHub Secrets for all downstream repositories.
-    Each repository needs these secrets:
+11. **GitHub Actions secrets are auto-provisioned** by bootstrap.
+    When `github_owner` and `github:token` are configured, bootstrap automatically
+    creates these secrets in each stage repository:
 
-    | Secret | Value | Source |
-    |--------|-------|--------|
-    | `WIF_PROVIDER_NAME` | `projects/.../providers/...` | `pulumi stack output wif_provider_name` |
-    | `SERVICE_ACCOUNT_EMAIL` | Stage-specific SA email | `pulumi stack output <stage>_sa_email` |
-    | `PULUMI_ACCESS_TOKEN` | Pulumi Cloud token | Pulumi Cloud console |
+    | Secret | Value | Provisioned By |
+    |--------|-------|----------------|
+    | `WIF_PROVIDER_NAME` | WIF provider full resource name | Bootstrap (auto) |
+    | `SERVICE_ACCOUNT_EMAIL` | Per-stage SA email | Bootstrap (auto) |
+    | `PROJECT_ID` | CI/CD project ID | Bootstrap (auto) |
+    | `PULUMI_ACCESS_TOKEN` | Pulumi Cloud token | **Manual** — set via GitHub UI or `gh secret set` |
+
+    > **Note:** `PULUMI_ACCESS_TOKEN` is NOT auto-provisioned because it is a
+    > Pulumi Cloud credential, not a GCP credential managed by bootstrap. Set it
+    > once as an organization-level secret in GitHub, or per-repo.
 
 12. Commit and push:
 

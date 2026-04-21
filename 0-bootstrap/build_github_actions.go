@@ -19,6 +19,7 @@ package main
 import (
 	"fmt"
 
+	ghactions "github.com/pulumi/pulumi-github/sdk/v6/go/github"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/iam"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/serviceaccount"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
@@ -44,7 +45,7 @@ type CICDBuildOutputs struct {
 //
 // This replaces the key-based GOOGLE_CREDENTIALS approach with short-lived
 // tokens, following GCP security best practices.
-func deployGitHubActionsBuild(ctx *pulumi.Context, cfg *Config, cicd *CICDProject, sas map[string]*serviceaccount.Account) (*CICDBuildOutputs, error) {
+func deployGitHubActionsBuild(ctx *pulumi.Context, cfg *Config, seed *SeedProject, cicd *CICDProject, sas map[string]*serviceaccount.Account) (*CICDBuildOutputs, error) {
 	outputs := &CICDBuildOutputs{}
 
 	// If github_owner is not set, skip WIF provisioning.
@@ -151,7 +152,78 @@ func deployGitHubActionsBuild(ctx *pulumi.Context, cfg *Config, cicd *CICDProjec
 	}
 
 	// ========================================================================
-	// 4. Outputs
+	// 4. GitHub Actions Secrets
+	// Automatically provision secrets in each stage repo so the pipeline
+	// templates (build/pulumi-preview.yml, build/pulumi-up.yml) work
+	// out of the box with zero manual setup.
+	// Mirrors: github_actions_secret "secrets" in build_github.tf.example
+	//
+	// Secrets created per repo:
+	//   WIF_PROVIDER_NAME     — full WIF provider resource name for auth
+	//   SERVICE_ACCOUNT_EMAIL — per-stage SA email for impersonation
+	//   PROJECT_ID            — CI/CD project ID
+	//   PULUMI_BACKEND_URL    — Backend GCS bucket URL (proj uses isolated bucket)
+	//
+	// Note: PULUMI_ACCESS_TOKEN is NOT provisioned here because it is a
+	// Pulumi Cloud credential, not a GCP credential. Users must set it
+	// manually or via their org-level GitHub secrets.
+	// ========================================================================
+	for key := range sas {
+		repo := stageRepos[key]
+		if repo == "" || repo == "*" {
+			continue // No specific repo configured for this stage
+		}
+
+		// Determine the appropriate state bucket for the stage
+		var backendBucket pulumi.StringOutput
+		if key == "proj" {
+			backendBucket = seed.ProjectsStateBucketName // Isolated state
+		} else {
+			backendBucket = seed.StateBucketName // Shared seed state
+		}
+		backendURL := backendBucket.ApplyT(func(name string) string {
+			return fmt.Sprintf("gs://%s", name)
+		}).(pulumi.StringOutput)
+
+		// WIF_PROVIDER_NAME: the full provider resource name for google-github-actions/auth
+		if _, err := ghactions.NewActionsSecret(ctx, fmt.Sprintf("gh-secret-%s-wif-provider", key), &ghactions.ActionsSecretArgs{
+			Repository:     pulumi.String(repo),
+			SecretName:     pulumi.String("WIF_PROVIDER_NAME"),
+			PlaintextValue: provider.Name,
+		}); err != nil {
+			return nil, err
+		}
+
+		// SERVICE_ACCOUNT_EMAIL: the SA this repo's pipeline should impersonate
+		if _, err := ghactions.NewActionsSecret(ctx, fmt.Sprintf("gh-secret-%s-sa-email", key), &ghactions.ActionsSecretArgs{
+			Repository:     pulumi.String(repo),
+			SecretName:     pulumi.String("SERVICE_ACCOUNT_EMAIL"),
+			PlaintextValue: sas[key].Email,
+		}); err != nil {
+			return nil, err
+		}
+
+		// PROJECT_ID: the CI/CD project for WIF auth
+		if _, err := ghactions.NewActionsSecret(ctx, fmt.Sprintf("gh-secret-%s-project-id", key), &ghactions.ActionsSecretArgs{
+			Repository:     pulumi.String(repo),
+			SecretName:     pulumi.String("PROJECT_ID"),
+			PlaintextValue: cicd.ProjectID,
+		}); err != nil {
+			return nil, err
+		}
+
+		// PULUMI_BACKEND_URL: the GCS bucket URL for self-managed state
+		if _, err := ghactions.NewActionsSecret(ctx, fmt.Sprintf("gh-secret-%s-backend", key), &ghactions.ActionsSecretArgs{
+			Repository:     pulumi.String(repo),
+			SecretName:     pulumi.String("PULUMI_BACKEND_URL"),
+			PlaintextValue: backendURL,
+		}); err != nil {
+			return nil, err
+		}
+	}
+
+	// ========================================================================
+	// 5. Outputs
 	// ========================================================================
 	outputs.WIFPoolName = pool.Name
 	outputs.WIFProviderName = provider.Name

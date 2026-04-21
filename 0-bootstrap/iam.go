@@ -45,9 +45,10 @@ func deployIAM(ctx *pulumi.Context, cfg *Config, seed *SeedProject, cicd *CICDPr
 	sas := make(map[string]*serviceaccount.Account)
 	for key, desc := range granularSAs {
 		sa, err := serviceaccount.NewAccount(ctx, fmt.Sprintf("sa-terraform-%s", key), &serviceaccount.AccountArgs{
-			Project:     seed.ProjectID,
-			AccountId:   pulumi.String(fmt.Sprintf("sa-terraform-%s", key)),
-			DisplayName: pulumi.String(desc),
+			Project:                    seed.ProjectID,
+			AccountId:                  pulumi.String(fmt.Sprintf("sa-terraform-%s", key)),
+			DisplayName:                pulumi.String(desc),
+			CreateIgnoreAlreadyExists:  pulumi.Bool(true),
 		})
 		if err != nil {
 			return nil, err

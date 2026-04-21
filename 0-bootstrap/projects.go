@@ -21,14 +21,16 @@ import (
 
 	"github.com/VitruvianSoftware/pulumi-library/pkg/bootstrap"
 	"github.com/VitruvianSoftware/pulumi-library/pkg/project"
+	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/storage"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )
 
 // SeedProject holds outputs from the seed project deployment.
 type SeedProject struct {
-	ProjectID       pulumi.StringOutput
-	StateBucketName pulumi.StringOutput
-	KMSKeyID        pulumi.StringOutput
+	ProjectID              pulumi.StringOutput
+	StateBucketName        pulumi.StringOutput
+	ProjectsStateBucketName pulumi.StringOutput // Separate bucket for 4-projects stage
+	KMSKeyID               pulumi.StringOutput
 }
 
 // CICDProject holds outputs from the CI/CD project deployment.
@@ -105,10 +107,35 @@ func deploySeedProject(ctx *pulumi.Context, cfg *Config, folderID pulumi.StringO
 		return nil, err
 	}
 
+	// Create a separate state bucket for the 4-projects stage.
+	// This isolates projects state from the main foundation state bucket.
+	// Mirrors: module "gcp_projects_state_bucket" in build_github.tf.example
+	projectsBucketName := b.SeedProjectID.ApplyT(func(id string) string {
+		return fmt.Sprintf("%s-%s-gcp-projects-tfstate", cfg.BucketPrefix, id)
+	}).(pulumi.StringOutput)
+
+	projectsStateBucket, err := storage.NewBucket(ctx, "projects-state-bucket", &storage.BucketArgs{
+		Name:                     projectsBucketName,
+		Project:                  b.SeedProjectID,
+		Location:                 pulumi.String(cfg.DefaultRegion),
+		ForceDestroy:             pulumi.Bool(cfg.BucketForceDestroy),
+		UniformBucketLevelAccess: pulumi.Bool(true),
+		Versioning: &storage.BucketVersioningArgs{
+			Enabled: pulumi.Bool(true),
+		},
+		Encryption: &storage.BucketEncryptionArgs{
+			DefaultKmsKeyName: b.KMSKeyID,
+		},
+	}, pulumi.DependsOn([]pulumi.Resource{b}))
+	if err != nil {
+		return nil, err
+	}
+
 	return &SeedProject{
-		ProjectID:       b.SeedProjectID,
-		StateBucketName: b.StateBucketName,
-		KMSKeyID:        b.KMSKeyID,
+		ProjectID:               b.SeedProjectID,
+		StateBucketName:         b.StateBucketName,
+		ProjectsStateBucketName: projectsStateBucket.Name,
+		KMSKeyID:                b.KMSKeyID,
 	}, nil
 }
 

@@ -69,7 +69,7 @@ func main() {
 		}
 
 		// 5b. Deploy CI/CD Build Infrastructure (GitHub Actions WIF by default)
-		buildOutputs, err := deployGitHubActionsBuild(ctx, cfg, cicd, sas)
+		buildOutputs, err := deployGitHubActionsBuild(ctx, cfg, seed, cicd, sas)
 		if err != nil {
 			return err
 		}
@@ -80,6 +80,7 @@ func main() {
 		ctx.Export("bootstrap_folder_id", bootstrapFolder.ID())
 		ctx.Export("bootstrap_folder_name", bootstrapFolder.Name)
 		ctx.Export("tf_state_bucket", seed.StateBucketName)
+		ctx.Export("projects_gcs_bucket_tfstate", seed.ProjectsStateBucketName)
 		ctx.Export("state_bucket_kms_key_id", seed.KMSKeyID)
 		for key, sa := range sas {
 			ctx.Export(key+"_sa_email", sa.Email)
