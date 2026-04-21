@@ -23,276 +23,449 @@ import (
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/dns"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi/config"
+
+	"github.com/VitruvianSoftware/pulumi-library/pkg/networking"
+	"github.com/VitruvianSoftware/pulumi-library/pkg/vpc_sc"
 )
 
 func main() {
 	pulumi.Run(func(ctx *pulumi.Context) error {
 		cfg := loadNetConfig(ctx)
 
-		// ====================================================================
-		// 1. Hub VPC — central routing point for the hub-and-spoke topology
-		// ====================================================================
-		hubVPC, err := compute.NewNetwork(ctx, "hub-vpc", &compute.NetworkArgs{
-			Project:                       pulumi.String(cfg.HubProjectID),
-			Name:                          pulumi.String(fmt.Sprintf("vpc-%s-hub", cfg.Env)),
-			AutoCreateSubnetworks:         pulumi.Bool(false),
-			RoutingMode:                   pulumi.String("GLOBAL"),
-			DeleteDefaultRoutesOnCreate: pulumi.Bool(true),
-		})
-		if err != nil {
-			return err
+		// Compute environment-specific advertised IP ranges
+		advertisedRanges := []networking.AdvertisedIPRange{
+			{Range: cfg.PscIP + "/32", Description: "PSC Endpoint"},
 		}
-
-		// Hub subnets
-		if _, err := compute.NewSubnetwork(ctx, "hub-subnet", &compute.SubnetworkArgs{
-			Project:               pulumi.String(cfg.HubProjectID),
-			Name:                  pulumi.String(fmt.Sprintf("sb-%s-hub-%s", cfg.Env, cfg.Region1)),
-			Network:               hubVPC.ID(),
-			Region:                pulumi.String(cfg.Region1),
-			IpCidrRange:           pulumi.String("10.0.0.0/18"),
-			PrivateIpGoogleAccess: pulumi.Bool(true),
-			LogConfig: &compute.SubnetworkLogConfigArgs{
-				AggregationInterval: pulumi.String("INTERVAL_5_SEC"),
-				FlowSampling:        pulumi.Float64(0.5),
-				Metadata:            pulumi.String("INCLUDE_ALL_METADATA"),
-			},
-		}); err != nil {
-			return err
+		// Hub (env_code "c") also advertises the DNS forwarding source range
+		if cfg.EnvCode == "c" {
+			advertisedRanges = append([]networking.AdvertisedIPRange{
+				{Range: "35.199.192.0/19", Description: "Google DNS Forwarding Source"},
+			}, advertisedRanges...)
 		}
 
 		// ====================================================================
-		// 2. Spoke VPC — workload VPC peered to the hub
+		// HUB ENVIRONMENT (Deployed in "shared" / env_code "c")
 		// ====================================================================
-		spokeVPC, err := compute.NewNetwork(ctx, "spoke-vpc", &compute.NetworkArgs{
-			Project:                       pulumi.String(cfg.SpokeProjectID),
-			Name:                          pulumi.String(fmt.Sprintf("vpc-%s-spoke", cfg.Env)),
-			AutoCreateSubnetworks:         pulumi.Bool(false),
-			RoutingMode:                   pulumi.String("GLOBAL"),
-			DeleteDefaultRoutesOnCreate: pulumi.Bool(true),
-		})
-		if err != nil {
-			return err
-		}
-
-		// Spoke subnets with GKE secondary ranges
-		if _, err := compute.NewSubnetwork(ctx, "spoke-subnet", &compute.SubnetworkArgs{
-			Project:               pulumi.String(cfg.SpokeProjectID),
-			Name:                  pulumi.String(fmt.Sprintf("sb-%s-spoke-%s", cfg.Env, cfg.Region1)),
-			Network:               spokeVPC.ID(),
-			Region:                pulumi.String(cfg.Region1),
-			IpCidrRange:           pulumi.String("10.1.0.0/18"),
-			PrivateIpGoogleAccess: pulumi.Bool(true),
-			LogConfig: &compute.SubnetworkLogConfigArgs{
-				AggregationInterval: pulumi.String("INTERVAL_5_SEC"),
-				FlowSampling:        pulumi.Float64(0.5),
-				Metadata:            pulumi.String("INCLUDE_ALL_METADATA"),
-			},
-			SecondaryIpRanges: compute.SubnetworkSecondaryIpRangeArray{
-				&compute.SubnetworkSecondaryIpRangeArgs{
-					RangeName:   pulumi.String(fmt.Sprintf("rn-%s-spoke-%s-gke-pod", cfg.Env, cfg.Region1)),
-					IpCidrRange: pulumi.String("100.66.0.0/16"),
-				},
-				&compute.SubnetworkSecondaryIpRangeArgs{
-					RangeName:   pulumi.String(fmt.Sprintf("rn-%s-spoke-%s-gke-svc", cfg.Env, cfg.Region1)),
-					IpCidrRange: pulumi.String("100.67.0.0/16"),
-				},
-			},
-		}); err != nil {
-			return err
-		}
-
-		// ====================================================================
-		// 3. VPC Peering — hub ↔ spoke bidirectional peering
-		// Export custom routes from hub so spokes can route through it.
-		// ====================================================================
-		if _, err := compute.NewNetworkPeering(ctx, "hub-to-spoke", &compute.NetworkPeeringArgs{
-			Network:              hubVPC.SelfLink,
-			PeerNetwork:          spokeVPC.SelfLink,
-			Name:                 pulumi.String(fmt.Sprintf("peer-%s-hub-to-spoke", cfg.Env)),
-			ExportCustomRoutes:   pulumi.Bool(true),
-			ImportCustomRoutes:   pulumi.Bool(false),
-			ExportSubnetRoutesWithPublicIp: pulumi.Bool(true),
-		}); err != nil {
-			return err
-		}
-
-		if _, err := compute.NewNetworkPeering(ctx, "spoke-to-hub", &compute.NetworkPeeringArgs{
-			Network:              spokeVPC.SelfLink,
-			PeerNetwork:          hubVPC.SelfLink,
-			Name:                 pulumi.String(fmt.Sprintf("peer-%s-spoke-to-hub", cfg.Env)),
-			ExportCustomRoutes:   pulumi.Bool(false),
-			ImportCustomRoutes:   pulumi.Bool(true),
-			ExportSubnetRoutesWithPublicIp: pulumi.Bool(true),
-		}); err != nil {
-			return err
-		}
-
-		// ====================================================================
-		// 4. Hierarchical Firewall Policies
-		// ====================================================================
-		fwPolicy, err := compute.NewFirewallPolicy(ctx, "fw-policy", &compute.FirewallPolicyArgs{
-			Parent:    pulumi.String(cfg.ParentID),
-			ShortName: pulumi.String(fmt.Sprintf("fw-%s-hub-spoke", cfg.Env)),
-		})
-		if err != nil {
-			return err
-		}
-
-		// Allow IAP TCP forwarding
-		if _, err := compute.NewFirewallPolicyRule(ctx, "fw-allow-iap", &compute.FirewallPolicyRuleArgs{
-			FirewallPolicy: fwPolicy.ID(),
-			Priority:       pulumi.Int(100),
-			Direction:      pulumi.String("INGRESS"),
-			Action:         pulumi.String("allow"),
-			Description:    pulumi.String("Allow IAP TCP forwarding for SSH and RDP"),
-			Match: &compute.FirewallPolicyRuleMatchArgs{
-				SrcIpRanges: pulumi.StringArray{pulumi.String("35.235.240.0/20")},
-				Layer4Configs: compute.FirewallPolicyRuleMatchLayer4ConfigArray{
-					&compute.FirewallPolicyRuleMatchLayer4ConfigArgs{
-						IpProtocol: pulumi.String("tcp"),
-						Ports:      pulumi.StringArray{pulumi.String("22"), pulumi.String("3389")},
-					},
-				},
-			},
-		}); err != nil {
-			return err
-		}
-
-		// Allow health checks
-		if _, err := compute.NewFirewallPolicyRule(ctx, "fw-allow-health-checks", &compute.FirewallPolicyRuleArgs{
-			FirewallPolicy: fwPolicy.ID(),
-			Priority:       pulumi.Int(200),
-			Direction:      pulumi.String("INGRESS"),
-			Action:         pulumi.String("allow"),
-			Description:    pulumi.String("Allow health check probes from GCP load balancers"),
-			Match: &compute.FirewallPolicyRuleMatchArgs{
-				SrcIpRanges: pulumi.StringArray{
-					pulumi.String("130.211.0.0/22"),
-					pulumi.String("35.191.0.0/16"),
-				},
-				Layer4Configs: compute.FirewallPolicyRuleMatchLayer4ConfigArray{
-					&compute.FirewallPolicyRuleMatchLayer4ConfigArgs{
-						IpProtocol: pulumi.String("tcp"),
-					},
-				},
-			},
-		}); err != nil {
-			return err
-		}
-
-		// Associate firewall policy
-		if _, err := compute.NewFirewallPolicyAssociation(ctx, "fw-association", &compute.FirewallPolicyAssociationArgs{
-			FirewallPolicy:   fwPolicy.ID(),
-			AttachmentTarget: pulumi.String(cfg.ParentID),
-			Name:             pulumi.String(fmt.Sprintf("fw-assoc-%s-hub-spoke", cfg.Env)),
-		}); err != nil {
-			return err
-		}
-
-		// ====================================================================
-		// 5. DNS Policy — logging and inbound forwarding on hub VPC
-		// ====================================================================
-		if _, err := dns.NewPolicy(ctx, "dns-policy", &dns.PolicyArgs{
-			Project:                 pulumi.String(cfg.HubProjectID),
-			Name:                    pulumi.String(fmt.Sprintf("dp-%s-hub", cfg.Env)),
-			EnableInboundForwarding: pulumi.Bool(true),
-			EnableLogging:           pulumi.Bool(true),
-			Networks: dns.PolicyNetworkArray{
-				&dns.PolicyNetworkArgs{
-					NetworkUrl: hubVPC.SelfLink,
-				},
-			},
-		}); err != nil {
-			return err
-		}
-
-		// ====================================================================
-		// 6. Cloud NAT — on both hub and spoke VPCs
-		// ====================================================================
-		for _, vpcEntry := range []struct {
-			name, project string
-			vpc           *compute.Network
-		}{
-			{"hub", cfg.HubProjectID, hubVPC},
-			{"spoke", cfg.SpokeProjectID, spokeVPC},
-		} {
-			router, err := compute.NewRouter(ctx, fmt.Sprintf("router-%s", vpcEntry.name), &compute.RouterArgs{
-				Project: pulumi.String(vpcEntry.project),
-				Name:    pulumi.String(fmt.Sprintf("cr-%s-%s-%s-router", cfg.Env, vpcEntry.name, cfg.Region1)),
-				Region:  pulumi.String(cfg.Region1),
-				Network: vpcEntry.vpc.SelfLink,
+		if cfg.Env == "shared" {
+			// 1. Hierarchical Firewall Policy (org/folder level)
+			fwPolicy, err := compute.NewFirewallPolicy(ctx, "hierarchical-fw", &compute.FirewallPolicyArgs{
+				Parent:      pulumi.String(cfg.ParentID),
+				ShortName:   pulumi.String(fmt.Sprintf("fw-%s-svpc-hierarchical", cfg.Env)),
+				Description: pulumi.String("Hierarchical firewall rules"),
 			})
 			if err != nil {
 				return err
 			}
 
-			if _, err := compute.NewRouterNat(ctx, fmt.Sprintf("nat-%s", vpcEntry.name), &compute.RouterNatArgs{
-				Project:                      pulumi.String(vpcEntry.project),
-				Router:                       router.Name,
-				Region:                       pulumi.String(cfg.Region1),
-				Name:                         pulumi.String(fmt.Sprintf("rn-%s-%s-%s", cfg.Env, vpcEntry.name, cfg.Region1)),
-				NatIpAllocateOption:          pulumi.String("AUTO_ONLY"),
-				SourceSubnetworkIpRangesToNat: pulumi.String("ALL_SUBNETWORKS_ALL_IP_RANGES"),
-				LogConfig: &compute.RouterNatLogConfigArgs{
-					Enable: pulumi.Bool(true),
-					Filter: pulumi.String("ERRORS_ONLY"),
-				},
+			_, err = compute.NewFirewallPolicyAssociation(ctx, "assoc", &compute.FirewallPolicyAssociationArgs{
+				FirewallPolicy:   fwPolicy.ID(),
+				AttachmentTarget: pulumi.String(cfg.ParentID),
+				Name:             pulumi.String(fmt.Sprintf("assoc-%s", cfg.Env)),
+			})
+			if err != nil {
+				return err
+			}
+
+			// 2. Hub Shared VPC Host
+			if _, err := compute.NewSharedVPCHostProject(ctx, "hub-svpc-host", &compute.SharedVPCHostProjectArgs{
+				Project: pulumi.String(cfg.HubProjectID),
 			}); err != nil {
 				return err
 			}
+
+			// 3. Hub VPC & Subnets
+			hubVpcName := fmt.Sprintf("vpc-%s-svpc-hub", cfg.EnvCode)
+			hubNetOpts := &networking.NetworkingArgs{
+				ProjectID: pulumi.String(cfg.HubProjectID),
+				VPCName:   pulumi.String(hubVpcName),
+				EnablePSA: true,
+				Subnets: []networking.SubnetArgs{
+					{
+						Name:   fmt.Sprintf("sb-%s-svpc-hub-%s", cfg.EnvCode, cfg.Region1),
+						Region: cfg.Region1,
+						CIDR:   "10.0.64.0/18",
+						SecondaryRanges: []networking.SecondaryRangeArgs{
+							{RangeName: fmt.Sprintf("rn-%s-hub-%s-gke-pod", cfg.EnvCode, cfg.Region1), CIDR: "100.64.64.0/18"},
+							{RangeName: fmt.Sprintf("rn-%s-hub-%s-gke-svc", cfg.EnvCode, cfg.Region1), CIDR: "100.65.64.0/18"},
+						},
+						FlowLogs: true,
+					},
+					{
+						Name:   fmt.Sprintf("sb-%s-svpc-hub-%s", cfg.EnvCode, cfg.Region2),
+						Region: cfg.Region2,
+						CIDR:   "10.1.64.0/18",
+						SecondaryRanges: []networking.SecondaryRangeArgs{
+							{RangeName: fmt.Sprintf("rn-%s-hub-%s-gke-pod", cfg.EnvCode, cfg.Region2), CIDR: "100.66.64.0/18"},
+							{RangeName: fmt.Sprintf("rn-%s-hub-%s-gke-svc", cfg.EnvCode, cfg.Region2), CIDR: "100.67.64.0/18"},
+						},
+						FlowLogs: true,
+					},
+				},
+			}
+
+			hubVpc, err := networking.NewNetworking(ctx, "hub", hubNetOpts)
+			if err != nil {
+				return err
+			}
+
+			// 4. Hub VPC-Level Firewall — data-driven rules
+			hubFw, err := networking.NewNetworkFirewallPolicy(ctx, "hub-vpc-fw", &networking.NetworkFirewallPolicyArgs{
+				ProjectID:  pulumi.String(cfg.HubProjectID),
+				PolicyName: fmt.Sprintf("fp-%s-hub-firewalls", cfg.EnvCode),
+				TargetVPCs: []pulumi.StringInput{
+					pulumi.Sprintf("projects/%s/global/networks/%s", cfg.HubProjectID, hubVpc.VPC.Name),
+				},
+				Rules: networking.BuildFoundationRules(cfg.EnvCode, true, cfg.PscIP+"/32", []string{"10.0.64.0/18", "10.1.64.0/18"}, true),
+			}, pulumi.DependsOn([]pulumi.Resource{hubVpc.VPC}))
+			if err != nil {
+				return err
+			}
+
+			// 5. PSC on hub
+			_, err = networking.NewPrivateServiceConnect(ctx, "hub-psc", &networking.PrivateServiceConnectArgs{
+				ProjectID:            pulumi.String(cfg.HubProjectID),
+				NetworkSelfLink:      hubVpc.VPC.SelfLink,
+				DnsCode:              fmt.Sprintf("dz-%s-hub", cfg.EnvCode),
+				IPAddress:            cfg.PscIP,
+				ForwardingRuleTarget: "vpc-sc",
+			}, pulumi.DependsOn([]pulumi.Resource{hubVpc.VPC}))
+			if err != nil {
+				return err
+			}
+
+			// 6. DNS Policy on hub
+			_, err = dns.NewPolicy(ctx, "hub-dns-policy", &dns.PolicyArgs{
+				Project:                 pulumi.String(cfg.HubProjectID),
+				Name:                    pulumi.String(fmt.Sprintf("dp-%s-hub-default-policy", cfg.EnvCode)),
+				EnableInboundForwarding: pulumi.Bool(true),
+				EnableLogging:           pulumi.Bool(true),
+				Networks: dns.PolicyNetworkArray{
+					&dns.PolicyNetworkArgs{
+						NetworkUrl: hubVpc.VPC.SelfLink,
+					},
+				},
+			}, pulumi.DependsOn([]pulumi.Resource{hubVpc.VPC}))
+			if err != nil {
+				return err
+			}
+
+			// 7. DNS forwarding zone on hub
+			_, err = networking.NewDnsZone(ctx, "dns-forwarding", &networking.DnsZoneArgs{
+				ProjectID:                 pulumi.String(cfg.HubProjectID),
+				Name:                      "fz-dns-hub",
+				Domain:                    cfg.Domain,
+				Type:                      "forwarding",
+				NetworkSelfLink:           hubVpc.VPC.SelfLink,
+				TargetNameServerAddresses: cfg.TargetNameServers,
+			})
+			if err != nil {
+				return err
+			}
+
+			// 8. Transitivity Appliance — MIG+ILB per region
+			_, err = networking.NewTransitivityAppliance(ctx, "transitivity", &networking.TransitivityApplianceArgs{
+				ProjectID:   pulumi.String(cfg.HubProjectID),
+				Regions:     []string{cfg.Region1, cfg.Region2},
+				Network:     hubVpc.VPC.SelfLink,
+				NetworkName: hubVpcName,
+				Subnetworks: map[string]pulumi.StringInput{
+					cfg.Region1: hubVpc.Subnets[fmt.Sprintf("sb-%s-svpc-hub-%s", cfg.EnvCode, cfg.Region1)].SelfLink,
+					cfg.Region2: hubVpc.Subnets[fmt.Sprintf("sb-%s-svpc-hub-%s", cfg.EnvCode, cfg.Region2)].SelfLink,
+				},
+				RegionalAggregates: map[string][]string{
+					cfg.Region1: {"10.0.0.0/16", "10.8.0.0/16", "100.64.0.0/18"},
+					cfg.Region2: {"10.1.0.0/16", "10.9.0.0/16", "100.66.0.0/18"},
+				},
+				FirewallPolicy: hubFw.Policy.Name,
+			}, pulumi.DependsOn([]pulumi.Resource{hubVpc.VPC}))
+			if err != nil {
+				return err
+			}
+
+			// 9. Hub BGP Routers — 4 total (2 per region), hub only (not on spokes)
+			for _, reg := range []string{cfg.Region1, cfg.Region2} {
+				for _, crIdx := range []string{"5", "6"} {
+					_, err = networking.NewCloudRouter(ctx, fmt.Sprintf("hub-cr-%s-cr%s", reg, crIdx), &networking.RouterArgs{
+						ProjectID:          pulumi.String(cfg.HubProjectID),
+						Region:             reg,
+						Network:            hubVpc.VPC.SelfLink,
+						BgpAsn:             cfg.BgpAsn,
+						AdvertisedGroups:   []string{"ALL_SUBNETS"},
+						AdvertisedIpRanges: advertisedRanges,
+						EnableNat:          false,
+					}, pulumi.DependsOn([]pulumi.Resource{hubVpc.VPC}))
+					if err != nil {
+						return err
+					}
+				}
+			}
+
+			// 10. Separate NAT routers on hub
+			for _, reg := range []string{cfg.Region1, cfg.Region2} {
+				_, err = networking.NewCloudRouter(ctx, fmt.Sprintf("hub-nat-%s", reg), &networking.RouterArgs{
+					ProjectID:       pulumi.String(cfg.HubProjectID),
+					Region:          reg,
+					Network:         hubVpc.VPC.SelfLink,
+					BgpAsn:          cfg.NatBgpAsn,
+					EnableNat:       true,
+					NatNumAddresses: cfg.NatNumAddresses,
+				}, pulumi.DependsOn([]pulumi.Resource{hubVpc.VPC}))
+				if err != nil {
+					return err
+				}
+			}
+
+			ctx.Export("hub_vpc_id", hubVpc.VPC.ID())
+			return nil
 		}
 
 		// ====================================================================
-		// 7. Restricted Google APIs route on hub VPC
+		// SPOKE ENVIRONMENT (dev, nonprod, prod)
 		// ====================================================================
-		if _, err := compute.NewRoute(ctx, "restricted-apis", &compute.RouteArgs{
-			Project:        pulumi.String(cfg.HubProjectID),
-			Name:           pulumi.String(fmt.Sprintf("rt-%s-hub-restricted-apis", cfg.Env)),
-			DestRange:      pulumi.String("199.36.153.4/30"),
-			Network:        hubVPC.SelfLink,
-			NextHopGateway: pulumi.String("default-internet-gateway"),
-			Priority:       pulumi.Int(1000),
+
+		if _, err := compute.NewSharedVPCHostProject(ctx, "spoke-svpc-host", &compute.SharedVPCHostProjectArgs{
+			Project: pulumi.String(cfg.SpokeProjectID),
 		}); err != nil {
 			return err
 		}
 
-		// ====================================================================
-		// 8. Exports
-		// ====================================================================
-		ctx.Export("hub_vpc_id", hubVPC.ID())
-		ctx.Export("hub_vpc_self_link", hubVPC.SelfLink)
-		ctx.Export("spoke_vpc_id", spokeVPC.ID())
-		ctx.Export("spoke_vpc_self_link", spokeVPC.SelfLink)
+		spokeVpcName := fmt.Sprintf("vpc-%s-svpc-spoke", cfg.EnvCode)
+		spokeNetOpts := &networking.NetworkingArgs{
+			ProjectID: pulumi.String(cfg.SpokeProjectID),
+			VPCName:   pulumi.String(spokeVpcName),
+			EnablePSA: true,
+			Subnets: []networking.SubnetArgs{
+				{
+					Name:   fmt.Sprintf("sb-%s-svpc-spoke-%s", cfg.EnvCode, cfg.Region1),
+					Region: cfg.Region1,
+					CIDR:   "10.8.64.0/18",
+					SecondaryRanges: []networking.SecondaryRangeArgs{
+						{RangeName: fmt.Sprintf("rn-%s-spoke-%s-gke-pod", cfg.EnvCode, cfg.Region1), CIDR: "100.72.64.0/18"},
+						{RangeName: fmt.Sprintf("rn-%s-spoke-%s-gke-svc", cfg.EnvCode, cfg.Region1), CIDR: "100.73.64.0/18"},
+					},
+					FlowLogs: true,
+				},
+				{
+					Name:   fmt.Sprintf("sb-%s-svpc-spoke-%s", cfg.EnvCode, cfg.Region2),
+					Region: cfg.Region2,
+					CIDR:   "10.9.64.0/18",
+					SecondaryRanges: []networking.SecondaryRangeArgs{
+						{RangeName: fmt.Sprintf("rn-%s-spoke-%s-gke-pod", cfg.EnvCode, cfg.Region2), CIDR: "100.74.64.0/18"},
+						{RangeName: fmt.Sprintf("rn-%s-spoke-%s-gke-svc", cfg.EnvCode, cfg.Region2), CIDR: "100.75.64.0/18"},
+					},
+					FlowLogs: true,
+				},
+				{
+					Name:    fmt.Sprintf("sb-%s-svpc-spoke-%s-proxy", cfg.EnvCode, cfg.Region1),
+					Region:  cfg.Region1,
+					CIDR:    "10.26.2.0/23",
+					Role:    "ACTIVE",
+					Purpose: "REGIONAL_MANAGED_PROXY",
+				},
+				{
+					Name:    fmt.Sprintf("sb-%s-svpc-spoke-%s-proxy", cfg.EnvCode, cfg.Region2),
+					Region:  cfg.Region2,
+					CIDR:    "10.27.2.0/23",
+					Role:    "ACTIVE",
+					Purpose: "REGIONAL_MANAGED_PROXY",
+				},
+			},
+		}
 
+		spokeVpc, err := networking.NewNetworking(ctx, "spoke", spokeNetOpts)
+		if err != nil {
+			return err
+		}
+
+		// Bi-Directional VPC Peering (Spoke <-> Hub)
+		// Order matters: local peering first, then peer peering depends on it
+		hubVpcRef := fmt.Sprintf("projects/%s/global/networks/vpc-c-svpc-hub", cfg.HubProjectID)
+
+		spokeToHub, err := compute.NewNetworkPeering(ctx, "spoke-to-hub", &compute.NetworkPeeringArgs{
+			Network:            spokeVpc.VPC.SelfLink,
+			PeerNetwork:        pulumi.String(hubVpcRef),
+			Name:               pulumi.String(fmt.Sprintf("np-%s-svpc-spoke-vpc-c-svpc-hub", cfg.EnvCode)),
+			ExportCustomRoutes: pulumi.Bool(false),
+			ImportCustomRoutes: pulumi.Bool(true), // Import hub's custom routes
+		})
+		if err != nil {
+			return err
+		}
+
+		_, err = compute.NewNetworkPeering(ctx, "hub-to-spoke", &compute.NetworkPeeringArgs{
+			Network:            pulumi.String(hubVpcRef),
+			PeerNetwork:        spokeVpc.VPC.SelfLink,
+			Name:               pulumi.String(fmt.Sprintf("np-vpc-c-svpc-hub-%s-svpc-spoke", cfg.EnvCode)),
+			ExportCustomRoutes: pulumi.Bool(true), // Export hub's custom routes to spoke
+			ImportCustomRoutes: pulumi.Bool(false),
+		}, pulumi.DependsOn([]pulumi.Resource{spokeToHub})) // Must create after spoke-to-hub
+		if err != nil {
+			return err
+		}
+
+		// Spoke VPC-Level Firewall — data-driven rules
+		_, err = networking.NewNetworkFirewallPolicy(ctx, "spoke-vpc-fw", &networking.NetworkFirewallPolicyArgs{
+			ProjectID:  pulumi.String(cfg.SpokeProjectID),
+			PolicyName: fmt.Sprintf("fp-%s-spoke-firewalls", cfg.EnvCode),
+			TargetVPCs: []pulumi.StringInput{
+				pulumi.Sprintf("projects/%s/global/networks/%s", cfg.SpokeProjectID, spokeVpc.VPC.Name),
+			},
+			Rules: networking.BuildFoundationRules(cfg.EnvCode, true, cfg.PscIP+"/32", []string{"10.8.64.0/18", "10.9.64.0/18"}, true),
+		}, pulumi.DependsOn([]pulumi.Resource{spokeVpc.VPC}))
+		if err != nil {
+			return err
+		}
+
+		// PSC on spoke
+		_, err = networking.NewPrivateServiceConnect(ctx, "spoke-psc", &networking.PrivateServiceConnectArgs{
+			ProjectID:            pulumi.String(cfg.SpokeProjectID),
+			NetworkSelfLink:      spokeVpc.VPC.SelfLink,
+			DnsCode:              fmt.Sprintf("dz-%s-spoke", cfg.EnvCode),
+			IPAddress:            cfg.PscIP,
+			ForwardingRuleTarget: "vpc-sc",
+		}, pulumi.DependsOn([]pulumi.Resource{spokeVpc.VPC}))
+		if err != nil {
+			return err
+		}
+
+		// DNS Policy on spoke
+		_, err = dns.NewPolicy(ctx, "spoke-dns-policy", &dns.PolicyArgs{
+			Project:                 pulumi.String(cfg.SpokeProjectID),
+			Name:                    pulumi.String(fmt.Sprintf("dp-%s-spoke-default-policy", cfg.EnvCode)),
+			EnableInboundForwarding: pulumi.Bool(true),
+			EnableLogging:           pulumi.Bool(true),
+			Networks: dns.PolicyNetworkArray{
+				&dns.PolicyNetworkArgs{
+					NetworkUrl: spokeVpc.VPC.SelfLink,
+				},
+			},
+		}, pulumi.DependsOn([]pulumi.Resource{spokeVpc.VPC}))
+		if err != nil {
+			return err
+		}
+
+		// DNS peering from spoke to hub
+		_, err = networking.NewDnsZone(ctx, "dns-peering", &networking.DnsZoneArgs{
+			ProjectID:             pulumi.String(cfg.SpokeProjectID),
+			Name:                  fmt.Sprintf("dz-%s-svpc-spoke-to-dns-hub", cfg.EnvCode),
+			Domain:                cfg.Domain,
+			Type:                  "peering",
+			NetworkSelfLink:       spokeVpc.VPC.SelfLink,
+			TargetNetworkSelfLink: pulumi.String(hubVpcRef),
+		})
+		if err != nil {
+			return err
+		}
+
+		// NAT routers on spoke (spokes don't get BGP routers in hub-and-spoke)
+		for _, reg := range []string{cfg.Region1, cfg.Region2} {
+			_, err = networking.NewCloudRouter(ctx, fmt.Sprintf("spoke-nat-%s", reg), &networking.RouterArgs{
+				ProjectID:       pulumi.String(cfg.SpokeProjectID),
+				Region:          reg,
+				Network:         spokeVpc.VPC.SelfLink,
+				BgpAsn:          cfg.NatBgpAsn,
+				EnableNat:       true,
+				NatNumAddresses: cfg.NatNumAddresses,
+			}, pulumi.DependsOn([]pulumi.Resource{spokeVpc.VPC}))
+			if err != nil {
+				return err
+			}
+		}
+
+		// VPC-SC on spoke
+		if cfg.PolicyID != "" {
+			_, err = vpc_sc.NewVpcServiceControls(ctx, "vpc-sc-perimeter", &vpc_sc.VpcServiceControlsArgs{
+				PolicyID:           pulumi.String(cfg.PolicyID),
+				Prefix:             fmt.Sprintf("%s_spoke", cfg.EnvCode),
+				Members:            cfg.VpcScMembers,
+				MembersDryRun:      cfg.VpcScMembers,
+				ProjectNumbers:     cfg.VpcScProjects,
+				RestrictedServices: cfg.VpcScRestrictedServices,
+				Enforce:            true,
+			})
+			if err != nil {
+				return err
+			}
+		}
+
+		ctx.Export("spoke_vpc_id", spokeVpc.VPC.ID())
 		return nil
 	})
 }
 
-// NetConfig holds configuration for the hub-and-spoke networks stage.
 type NetConfig struct {
-	Env            string
-	HubProjectID   string
-	SpokeProjectID string
-	Region1        string
-	Region2        string
-	ParentID       string // "organizations/123" or "folders/456"
+	Env                     string
+	EnvCode                 string
+	HubProjectID            string
+	SpokeProjectID          string
+	Region1                 string
+	Region2                 string
+	ParentID                string
+	Domain                  string
+	PolicyID                string
+	PscIP                   string
+	BgpAsn                  int
+	NatBgpAsn               int
+	NatNumAddresses         int
+	TargetNameServers       []string
+	VpcScMembers            []string
+	VpcScProjects           []string
+	VpcScRestrictedServices []string
 }
 
 func loadNetConfig(ctx *pulumi.Context) *NetConfig {
 	conf := config.New(ctx, "")
+
+	defaultServices := []string{
+		"storage.googleapis.com",
+		"compute.googleapis.com",
+		"bigquery.googleapis.com",
+		"container.googleapis.com",
+		"pubsub.googleapis.com",
+	}
+
 	c := &NetConfig{
 		Env:            conf.Require("env"),
+		EnvCode:        conf.Require("env_code"),
 		HubProjectID:   conf.Require("hub_project_id"),
-		SpokeProjectID: conf.Require("spoke_project_id"),
+		SpokeProjectID: conf.Get("spoke_project_id"),
 		Region1:        conf.Get("region1"),
 		Region2:        conf.Get("region2"),
-		ParentID:       conf.Require("parent_id"),
+		ParentID:       conf.Get("parent_id"),
+		Domain:         conf.Get("domain"),
+		PolicyID:       conf.Get("policy_id"),
+		PscIP:          conf.Get("psc_ip"),
 	}
+	conf.GetObject("vpc_sc_members", &c.VpcScMembers)
+	conf.GetObject("vpc_sc_projects", &c.VpcScProjects)
+	conf.GetObject("vpc_sc_restricted_services", &c.VpcScRestrictedServices)
+	conf.GetObject("target_name_servers", &c.TargetNameServers)
+
 	if c.Region1 == "" {
 		c.Region1 = "us-central1"
 	}
 	if c.Region2 == "" {
 		c.Region2 = "us-west1"
 	}
+	if c.Domain == "" {
+		c.Domain = "example.com."
+	}
+	if c.PscIP == "" {
+		c.PscIP = "10.17.0.6"
+	}
+	if c.ParentID == "" {
+		c.ParentID = "organizations/123456789012"
+	}
+	if len(c.VpcScRestrictedServices) == 0 {
+		c.VpcScRestrictedServices = defaultServices
+	}
+	if len(c.TargetNameServers) == 0 {
+		c.TargetNameServers = []string{"10.0.0.1"}
+	}
+
+	c.BgpAsn = 64514
+	c.NatBgpAsn = 64514
+	c.NatNumAddresses = 2
+
 	return c
 }
