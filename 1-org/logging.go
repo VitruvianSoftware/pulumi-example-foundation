@@ -105,23 +105,51 @@ logName: /logs/dns.googleapis.com%2Fdns_queries`
 		return nil, err
 	}
 
-	// 1b. Organization Sink → Logging Project Bucket
-	orgSinkProject, err := logging.NewOrganizationSink(ctx, "org-sink-project", &logging.OrganizationSinkArgs{
-		Name:  pulumi.String("sk-c-logging-prj"),
-		OrgId: pulumi.String(cfg.OrgID),
-		Destination: auditProjectID.ApplyT(func(id string) string {
-			return fmt.Sprintf("logging.googleapis.com/projects/%s/locations/%s/buckets/AggregatedLogs", id, cfg.DefaultRegion)
-		}).(pulumi.StringOutput),
-		Filter:          pulumi.String(logFilter),
-		IncludeChildren: pulumi.Bool(true),
-	})
+	// Helper to create sink based on parent type
+	createSink := func(logicalName, resourceName string, destination pulumi.StringInput) (pulumi.Resource, pulumi.StringOutput, error) {
+		name := pulumi.String(resourceName)
+		filter := pulumi.String(logFilter)
+		includeChildren := pulumi.Bool(true)
+
+		if cfg.ParentType == "folder" {
+			sink, err := logging.NewFolderSink(ctx, logicalName, &logging.FolderSinkArgs{
+				Name:            name,
+				Folder:          pulumi.String(cfg.ParentFolder),
+				Destination:     destination,
+				Filter:          filter,
+				IncludeChildren: includeChildren,
+			})
+			if err != nil {
+				return nil, pulumi.StringOutput{}, err
+			}
+			return sink, sink.WriterIdentity, nil
+		}
+
+		sink, err := logging.NewOrganizationSink(ctx, logicalName, &logging.OrganizationSinkArgs{
+			Name:            name,
+			OrgId:           pulumi.String(cfg.OrgID),
+			Destination:     destination,
+			Filter:          filter,
+			IncludeChildren: includeChildren,
+		})
+		if err != nil {
+			return nil, pulumi.StringOutput{}, err
+		}
+		return sink, sink.WriterIdentity, nil
+	}
+
+	// 1b. Organization/Folder Sink → Logging Project Bucket
+	projectDest := auditProjectID.ApplyT(func(id string) string {
+		return fmt.Sprintf("logging.googleapis.com/projects/%s/locations/%s/buckets/AggregatedLogs", id, cfg.DefaultRegion)
+	}).(pulumi.StringOutput)
+	sinkProject, _, err := createSink("org-sink-project", "sk-c-logging-prj", projectDest)
 	if err != nil {
 		return nil, err
 	}
-	lastResource = orgSinkProject
+	lastResource = sinkProject
 
 	// ========================================================================
-	// 2. Organization Sink → Cloud Storage (long-term retention)
+	// 2. Organization/Folder Sink → Cloud Storage (long-term retention)
 	// ========================================================================
 	logBucket, err := storage.NewBucket(ctx, "org-log-storage", &storage.BucketArgs{
 		Project: auditProjectID,
@@ -142,15 +170,10 @@ logName: /logs/dns.googleapis.com%2Fdns_queries`
 		return nil, err
 	}
 
-	storageSink, err := logging.NewOrganizationSink(ctx, "org-sink-storage", &logging.OrganizationSinkArgs{
-		Name:  pulumi.String("sk-c-logging-bkt"),
-		OrgId: pulumi.String(cfg.OrgID),
-		Destination: logBucket.Name.ApplyT(func(name string) string {
-			return fmt.Sprintf("storage.googleapis.com/%s", name)
-		}).(pulumi.StringOutput),
-		Filter:          pulumi.String(logFilter),
-		IncludeChildren: pulumi.Bool(true),
-	})
+	storageDest := logBucket.Name.ApplyT(func(name string) string {
+		return fmt.Sprintf("storage.googleapis.com/%s", name)
+	}).(pulumi.StringOutput)
+	_, storageWriter, err := createSink("org-sink-storage", "sk-c-logging-bkt", storageDest)
 	if err != nil {
 		return nil, err
 	}
@@ -159,13 +182,13 @@ logName: /logs/dns.googleapis.com%2Fdns_queries`
 	if _, err := storage.NewBucketIAMMember(ctx, "storage-sink-writer", &storage.BucketIAMMemberArgs{
 		Bucket: logBucket.Name,
 		Role:   pulumi.String("roles/storage.objectCreator"),
-		Member: storageSink.WriterIdentity,
+		Member: storageWriter,
 	}); err != nil {
 		return nil, err
 	}
 
 	// ========================================================================
-	// 3. Organization Sink → Pub/Sub (real-time streaming / external export)
+	// 3. Organization/Folder Sink → Pub/Sub (real-time streaming / external export)
 	// ========================================================================
 	logTopic, err := pubsub.NewTopic(ctx, "org-log-topic", &pubsub.TopicArgs{
 		Project: auditProjectID,
@@ -185,15 +208,10 @@ logName: /logs/dns.googleapis.com%2Fdns_queries`
 		return nil, err
 	}
 
-	pubsubSink, err := logging.NewOrganizationSink(ctx, "org-sink-pubsub", &logging.OrganizationSinkArgs{
-		Name:  pulumi.String("sk-c-logging-pub"),
-		OrgId: pulumi.String(cfg.OrgID),
-		Destination: logTopic.ID().ApplyT(func(id string) string {
-			return fmt.Sprintf("pubsub.googleapis.com/%s", id)
-		}).(pulumi.StringOutput),
-		Filter:          pulumi.String(logFilter),
-		IncludeChildren: pulumi.Bool(true),
-	})
+	pubsubDest := logTopic.ID().ApplyT(func(id string) string {
+		return fmt.Sprintf("pubsub.googleapis.com/%s", id)
+	}).(pulumi.StringOutput)
+	_, pubsubWriter, err := createSink("org-sink-pubsub", "sk-c-logging-pub", pubsubDest)
 	if err != nil {
 		return nil, err
 	}
@@ -203,7 +221,7 @@ logName: /logs/dns.googleapis.com%2Fdns_queries`
 		Project: auditProjectID,
 		Topic:   logTopic.Name,
 		Role:    pulumi.String("roles/pubsub.publisher"),
-		Member:  pubsubSink.WriterIdentity,
+		Member:  pubsubWriter,
 	})
 	if err != nil {
 		return nil, err
