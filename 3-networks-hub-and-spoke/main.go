@@ -66,6 +66,137 @@ func main() {
 				return err
 			}
 
+			// Rule 1: Delegate RFC1918 ingress
+			_, err = compute.NewFirewallPolicyRule(ctx, "delegate-rfc1918-ingress", &compute.FirewallPolicyRuleArgs{
+				FirewallPolicy: fwPolicy.ID(),
+				Priority:       pulumi.Int(500),
+				Direction:      pulumi.String("INGRESS"),
+				Action:         pulumi.String("goto_next"),
+				Description:    pulumi.String("Delegate RFC1918 ingress"),
+				Match: &compute.FirewallPolicyRuleMatchArgs{
+					SrcIpRanges: pulumi.StringArray{
+						pulumi.String("192.168.0.0/16"),
+						pulumi.String("10.0.0.0/8"),
+						pulumi.String("172.16.0.0/12"),
+					},
+					Layer4Configs: compute.FirewallPolicyRuleMatchLayer4ConfigArray{
+						&compute.FirewallPolicyRuleMatchLayer4ConfigArgs{
+							IpProtocol: pulumi.String("all"),
+						},
+					},
+				},
+			})
+			if err != nil {
+				return err
+			}
+
+			// Rule 2: Delegate RFC1918 egress
+			_, err = compute.NewFirewallPolicyRule(ctx, "delegate-rfc1918-egress", &compute.FirewallPolicyRuleArgs{
+				FirewallPolicy: fwPolicy.ID(),
+				Priority:       pulumi.Int(510),
+				Direction:      pulumi.String("EGRESS"),
+				Action:         pulumi.String("goto_next"),
+				Description:    pulumi.String("Delegate RFC1918 egress"),
+				Match: &compute.FirewallPolicyRuleMatchArgs{
+					DestIpRanges: pulumi.StringArray{
+						pulumi.String("192.168.0.0/16"),
+						pulumi.String("10.0.0.0/8"),
+						pulumi.String("172.16.0.0/12"),
+					},
+					Layer4Configs: compute.FirewallPolicyRuleMatchLayer4ConfigArray{
+						&compute.FirewallPolicyRuleMatchLayer4ConfigArgs{
+							IpProtocol: pulumi.String("all"),
+						},
+					},
+				},
+			})
+			if err != nil {
+				return err
+			}
+
+			// Rule 3: Allow IAP SSH RDP
+			_, err = compute.NewFirewallPolicyRule(ctx, "allow-iap-ssh-rdp", &compute.FirewallPolicyRuleArgs{
+				FirewallPolicy: fwPolicy.ID(),
+				Priority:       pulumi.Int(5000),
+				Direction:      pulumi.String("INGRESS"),
+				Action:         pulumi.String("allow"),
+				Description:    pulumi.String("Always allow SSH and RDP from IAP"),
+				Match: &compute.FirewallPolicyRuleMatchArgs{
+					SrcIpRanges: pulumi.StringArray{
+						pulumi.String("35.235.240.0/20"),
+					},
+					Layer4Configs: compute.FirewallPolicyRuleMatchLayer4ConfigArray{
+						&compute.FirewallPolicyRuleMatchLayer4ConfigArgs{
+							IpProtocol: pulumi.String("tcp"),
+							Ports: pulumi.StringArray{
+								pulumi.String("22"),
+								pulumi.String("3389"),
+							},
+						},
+					},
+				},
+				EnableLogging: pulumi.Bool(cfg.FirewallPoliciesEnableLogging),
+			})
+			if err != nil {
+				return err
+			}
+
+			// Rule 4: Allow Windows Activation
+			_, err = compute.NewFirewallPolicyRule(ctx, "allow-windows-activation", &compute.FirewallPolicyRuleArgs{
+				FirewallPolicy: fwPolicy.ID(),
+				Priority:       pulumi.Int(5100),
+				Direction:      pulumi.String("EGRESS"),
+				Action:         pulumi.String("allow"),
+				Description:    pulumi.String("Always outgoing Windows KMS traffic"),
+				Match: &compute.FirewallPolicyRuleMatchArgs{
+					DestIpRanges: pulumi.StringArray{
+						pulumi.String("35.190.247.13/32"),
+					},
+					Layer4Configs: compute.FirewallPolicyRuleMatchLayer4ConfigArray{
+						&compute.FirewallPolicyRuleMatchLayer4ConfigArgs{
+							IpProtocol: pulumi.String("tcp"),
+							Ports: pulumi.StringArray{
+								pulumi.String("1688"),
+							},
+						},
+					},
+				},
+				EnableLogging: pulumi.Bool(cfg.FirewallPoliciesEnableLogging),
+			})
+			if err != nil {
+				return err
+			}
+
+			// Rule 5: Allow Google HBS and HCS
+			_, err = compute.NewFirewallPolicyRule(ctx, "allow-google-hbs-hcs", &compute.FirewallPolicyRuleArgs{
+				FirewallPolicy: fwPolicy.ID(),
+				Priority:       pulumi.Int(5200),
+				Direction:      pulumi.String("INGRESS"),
+				Action:         pulumi.String("allow"),
+				Description:    pulumi.String("Always allow connections from Google load balancer and health check ranges"),
+				Match: &compute.FirewallPolicyRuleMatchArgs{
+					SrcIpRanges: pulumi.StringArray{
+						pulumi.String("35.191.0.0/16"),
+						pulumi.String("130.211.0.0/22"),
+						pulumi.String("209.85.152.0/22"),
+						pulumi.String("209.85.204.0/22"),
+					},
+					Layer4Configs: compute.FirewallPolicyRuleMatchLayer4ConfigArray{
+						&compute.FirewallPolicyRuleMatchLayer4ConfigArgs{
+							IpProtocol: pulumi.String("tcp"),
+							Ports: pulumi.StringArray{
+								pulumi.String("80"),
+								pulumi.String("443"),
+							},
+						},
+					},
+				},
+				EnableLogging: pulumi.Bool(cfg.FirewallPoliciesEnableLogging),
+			})
+			if err != nil {
+				return err
+			}
+
 			// 2. Hub Shared VPC Host
 			if _, err := compute.NewSharedVPCHostProject(ctx, "hub-svpc-host", &compute.SharedVPCHostProjectArgs{
 				Project: pulumi.String(cfg.HubProjectID),
@@ -410,18 +541,136 @@ type NetConfig struct {
 	TargetNameServers       []string
 	VpcScMembers            []string
 	VpcScProjects           []string
-	VpcScRestrictedServices []string
+	VpcScRestrictedServices       []string
+	FirewallPoliciesEnableLogging bool
 }
 
 func loadNetConfig(ctx *pulumi.Context) *NetConfig {
 	conf := config.New(ctx, "")
 
 	defaultServices := []string{
-		"storage.googleapis.com",
-		"compute.googleapis.com",
+		"accessapproval.googleapis.com",
+		"adsdatahub.googleapis.com",
+		"aiplatform.googleapis.com",
+		"alloydb.googleapis.com",
+		"analyticshub.googleapis.com",
+		"apigee.googleapis.com",
+		"apigeeconnect.googleapis.com",
+		"artifactregistry.googleapis.com",
+		"assuredworkloads.googleapis.com",
+		"automl.googleapis.com",
+		"baremetalsolution.googleapis.com",
+		"batch.googleapis.com",
 		"bigquery.googleapis.com",
+		"bigquerydatapolicy.googleapis.com",
+		"bigquerydatatransfer.googleapis.com",
+		"bigquerymigration.googleapis.com",
+		"bigqueryreservation.googleapis.com",
+		"bigtable.googleapis.com",
+		"binaryauthorization.googleapis.com",
+		"cloud.googleapis.com",
+		"cloudasset.googleapis.com",
+		"cloudbuild.googleapis.com",
+		"clouddebugger.googleapis.com",
+		"clouddeploy.googleapis.com",
+		"clouderrorreporting.googleapis.com",
+		"cloudfunctions.googleapis.com",
+		"cloudkms.googleapis.com",
+		"cloudprofiler.googleapis.com",
+		"cloudresourcemanager.googleapis.com",
+		"cloudscheduler.googleapis.com",
+		"cloudsearch.googleapis.com",
+		"cloudtrace.googleapis.com",
+		"composer.googleapis.com",
+		"compute.googleapis.com",
+		"confidentialcomputing.googleapis.com",
+		"connectgateway.googleapis.com",
+		"contactcenterinsights.googleapis.com",
 		"container.googleapis.com",
+		"containeranalysis.googleapis.com",
+		"containerfilesystem.googleapis.com",
+		"containerregistry.googleapis.com",
+		"containerthreatdetection.googleapis.com",
+		"datacatalog.googleapis.com",
+		"dataflow.googleapis.com",
+		"datafusion.googleapis.com",
+		"datamigration.googleapis.com",
+		"dataplex.googleapis.com",
+		"dataproc.googleapis.com",
+		"datastream.googleapis.com",
+		"dialogflow.googleapis.com",
+		"dlp.googleapis.com",
+		"dns.googleapis.com",
+		"documentai.googleapis.com",
+		"domains.googleapis.com",
+		"eventarc.googleapis.com",
+		"file.googleapis.com",
+		"firebaseappcheck.googleapis.com",
+		"firebaserules.googleapis.com",
+		"firestore.googleapis.com",
+		"gameservices.googleapis.com",
+		"gkebackup.googleapis.com",
+		"gkeconnect.googleapis.com",
+		"gkehub.googleapis.com",
+		"healthcare.googleapis.com",
+		"iam.googleapis.com",
+		"iamcredentials.googleapis.com",
+		"iaptunnel.googleapis.com",
+		"ids.googleapis.com",
+		"integrations.googleapis.com",
+		"kmsinventory.googleapis.com",
+		"krmapihosting.googleapis.com",
+		"language.googleapis.com",
+		"lifesciences.googleapis.com",
+		"logging.googleapis.com",
+		"managedidentities.googleapis.com",
+		"memcache.googleapis.com",
+		"meshca.googleapis.com",
+		"meshconfig.googleapis.com",
+		"metastore.googleapis.com",
+		"ml.googleapis.com",
+		"monitoring.googleapis.com",
+		"networkconnectivity.googleapis.com",
+		"networkmanagement.googleapis.com",
+		"networksecurity.googleapis.com",
+		"networkservices.googleapis.com",
+		"notebooks.googleapis.com",
+		"opsconfigmonitoring.googleapis.com",
+		"orgpolicy.googleapis.com",
+		"osconfig.googleapis.com",
+		"oslogin.googleapis.com",
+		"privateca.googleapis.com",
 		"pubsub.googleapis.com",
+		"pubsublite.googleapis.com",
+		"recaptchaenterprise.googleapis.com",
+		"recommender.googleapis.com",
+		"redis.googleapis.com",
+		"retail.googleapis.com",
+		"run.googleapis.com",
+		"secretmanager.googleapis.com",
+		"servicecontrol.googleapis.com",
+		"servicedirectory.googleapis.com",
+		"spanner.googleapis.com",
+		"speakerid.googleapis.com",
+		"speech.googleapis.com",
+		"sqladmin.googleapis.com",
+		"storage.googleapis.com",
+		"storagetransfer.googleapis.com",
+		"sts.googleapis.com",
+		"texttospeech.googleapis.com",
+		"timeseriesinsights.googleapis.com",
+		"tpu.googleapis.com",
+		"trafficdirector.googleapis.com",
+		"transcoder.googleapis.com",
+		"translate.googleapis.com",
+		"videointelligence.googleapis.com",
+		"vision.googleapis.com",
+		"visionai.googleapis.com",
+		"vmmigration.googleapis.com",
+		"vpcaccess.googleapis.com",
+		"webrisk.googleapis.com",
+		"workflows.googleapis.com",
+		"workstations.googleapis.com",
 	}
 
 	c := &NetConfig{
@@ -440,6 +689,12 @@ func loadNetConfig(ctx *pulumi.Context) *NetConfig {
 	conf.GetObject("vpc_sc_projects", &c.VpcScProjects)
 	conf.GetObject("vpc_sc_restricted_services", &c.VpcScRestrictedServices)
 	conf.GetObject("target_name_servers", &c.TargetNameServers)
+
+	if val, err := conf.TryBool("firewall_policies_enable_logging"); err == nil {
+		c.FirewallPoliciesEnableLogging = val
+	} else {
+		c.FirewallPoliciesEnableLogging = true // Default to true matching TF
+	}
 
 	if c.Region1 == "" {
 		c.Region1 = "us-central1"
