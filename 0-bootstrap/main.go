@@ -69,7 +69,7 @@ func main() {
 		}
 
 		// 5b. Deploy CI/CD Build Infrastructure (GitHub Actions WIF by default)
-		buildOutputs, err := deployGitHubActionsBuild(ctx, cfg, cicd, sas)
+		buildOutputs, err := deployGitHubActionsBuild(ctx, cfg, seed, cicd, sas)
 		if err != nil {
 			return err
 		}

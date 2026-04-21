@@ -45,7 +45,7 @@ type CICDBuildOutputs struct {
 //
 // This replaces the key-based GOOGLE_CREDENTIALS approach with short-lived
 // tokens, following GCP security best practices.
-func deployGitHubActionsBuild(ctx *pulumi.Context, cfg *Config, cicd *CICDProject, sas map[string]*serviceaccount.Account) (*CICDBuildOutputs, error) {
+func deployGitHubActionsBuild(ctx *pulumi.Context, cfg *Config, seed *SeedProject, cicd *CICDProject, sas map[string]*serviceaccount.Account) (*CICDBuildOutputs, error) {
 	outputs := &CICDBuildOutputs{}
 
 	// If github_owner is not set, skip WIF provisioning.
