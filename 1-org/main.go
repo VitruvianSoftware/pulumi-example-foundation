@@ -159,13 +159,6 @@ func main() {
 		ctx.Export("logs_export_pubsub_topic", logOutputs.PubSubTopicName)
 		ctx.Export("logs_export_project_logbucket_name", logOutputs.LogBucketName)
 		ctx.Export("logs_export_project_linked_dataset_name", logOutputs.LinkedDatasetName)
-		if len(logOutputs.BillingSinkNames) > 0 {
-			billingSinkArr := make(pulumi.StringArray, len(logOutputs.BillingSinkNames))
-			for i, name := range logOutputs.BillingSinkNames {
-				billingSinkArr[i] = name
-			}
-			ctx.Export("billing_sink_names", billingSinkArr)
-		}
 
 		// SCC
 		ctx.Export("scc_notification_name", pulumi.String(cfg.SCCNotificationName))
