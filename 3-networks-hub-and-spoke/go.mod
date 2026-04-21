@@ -5,6 +5,7 @@ go 1.26.1
 replace github.com/VitruvianSoftware/pulumi-library => /Users/james/Workspace/gh/infrastructure/vitruvian/pulumi-library
 
 require (
+	github.com/VitruvianSoftware/pulumi-library v0.0.0-20260421061745-09b15eb427f9
 	github.com/pulumi/pulumi-gcp/sdk/v9 v9.20.0
 	github.com/pulumi/pulumi/sdk/v3 v3.231.0
 )
@@ -81,6 +82,7 @@ require (
 	github.com/santhosh-tekuri/jsonschema/v5 v5.0.0 // indirect
 	github.com/sergi/go-diff v1.4.0 // indirect
 	github.com/skeema/knownhosts v1.3.1 // indirect
+	github.com/spf13/cast v1.4.1 // indirect
 	github.com/spf13/cobra v1.10.2 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/texttheater/golang-levenshtein v1.0.1 // indirect
