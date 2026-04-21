@@ -104,6 +104,14 @@ func deployEnvBaseline(ctx *pulumi.Context, cfg *EnvConfig, env, envCode string,
 	// ========================================================================
 	// 3. KMS Project
 	// Mirrors: kms.tf — module "env_kms"
+	//
+	// Upstream TF parity notes:
+	// - TF uses time_sleep.wait_60_seconds (destroy_duration=60s) between folder
+	//   creation and project creation. In Pulumi, DependsOn on envFolder provides
+	//   create-time ordering; the 60s delay is destroy-time only and is not
+	//   replicated since Pulumi handles destroy ordering via its dependency graph.
+	// - TF sets disable_services_on_destroy=false. Pulumi's project component
+	//   does not disable services on destroy by default, which matches.
 	// ========================================================================
 	kmsProject, err := project.NewProject(ctx, fmt.Sprintf("env-kms-%s", env), &project.ProjectArgs{
 		ProjectID:      pulumi.String(fmt.Sprintf("%s-%s-kms", cfg.ProjectPrefix, envCode)),
@@ -139,6 +147,10 @@ func deployEnvBaseline(ctx *pulumi.Context, cfg *EnvConfig, env, envCode string,
 	// ========================================================================
 	// 4. Secrets Project
 	// Mirrors: secrets.tf — module "env_secrets"
+	//
+	// Same upstream TF parity notes as KMS project above:
+	// - destroy_duration=60s from time_sleep not replicated (Pulumi graph ordering)
+	// - disable_services_on_destroy=false matches Pulumi default
 	// ========================================================================
 	secretsProject, err := project.NewProject(ctx, fmt.Sprintf("env-secrets-%s", env), &project.ProjectArgs{
 		ProjectID:      pulumi.String(fmt.Sprintf("%s-%s-secrets", cfg.ProjectPrefix, envCode)),
