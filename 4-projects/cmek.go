@@ -44,6 +44,7 @@ func deployCMEKStorage(
 	ctx *pulumi.Context,
 	cfg *ProjectsConfig,
 	svpcProject *libproject.Project,
+	kmsProjectID pulumi.StringOutput,
 ) (*CMEKResult, error) {
 	projectID := svpcProject.Project.ProjectId
 
@@ -51,7 +52,7 @@ func deployCMEKStorage(
 	keyring, err := kms.NewKeyRing(ctx, "cmek-keyring", &kms.KeyRingArgs{
 		Name:     pulumi.String(cfg.KeyringName),
 		Location: pulumi.String(cfg.KMSLocation),
-		Project:  projectID,
+		Project:  kmsProjectID,
 	})
 	if err != nil {
 		return nil, err

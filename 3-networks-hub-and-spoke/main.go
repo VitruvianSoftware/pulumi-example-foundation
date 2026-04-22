@@ -369,7 +369,7 @@ func main() {
 
 		// VPC-SC on spoke
 		if cfg.PolicyID != "" {
-			_, err = vpc_sc.NewVpcServiceControls(ctx, "vpc-sc-perimeter", &vpc_sc.VpcServiceControlsArgs{
+			perimeter, err := vpc_sc.NewVpcServiceControls(ctx, "vpc-sc-perimeter", &vpc_sc.VpcServiceControlsArgs{
 				PolicyID:              pulumi.String(cfg.PolicyID),
 				Prefix:                fmt.Sprintf("%s_spoke", cfg.EnvCode),
 				Members:               cfg.VpcScMembers,
@@ -385,6 +385,7 @@ func main() {
 			if err != nil {
 				return err
 			}
+			ctx.Export("service_perimeter_name", perimeter.Perimeter.Name)
 		}
 
 		ctx.Export("spoke_vpc_id", spokeVpc.VPC.ID())
