@@ -10,10 +10,11 @@ The purpose of this step is to deploy sample application infrastructure in one o
 
 This stage deploys:
 
-- A **[Cloud Run](https://cloud.google.com/run)** service (`chat-demo`) using the official `hello` container image in the SVPC-attached project — demonstrating how applications are deployed within the VPC-connected project
-- A **[BigQuery](https://cloud.google.com/bigquery)** dataset (`airline-data`) in the floating project — demonstrating a data platform deployment using the shared library's `data` component
+- A **Base Compute Instance** in the SVPC-attached project (`prj-{env}-{bu}-sample-svpc`) using the shared VPC subnet.
+- A **Base Compute Instance** in the Peering project (`prj-{env}-{bu}-sample-peering`) using the peering VPC subnet, with attached IAP Secure Tags for firewall evaluation.
+- An optional **Confidential Space VM** in the Confidential Space project (`prj-{env}-{bu}-conf-space`), utilizing a dedicated Workload Identity Pool and Provider for attestation, and running the `confidential-space` OS image.
 
-The SVPC-attached project (`prj-{env}-{bu}-sample-svpc`) is used for the application deployment because it has network connectivity through the Shared VPC created in Stage 3. The floating project (`prj-{env}-{bu}-sample-floating`) is used for the data platform because BigQuery does not require VPC connectivity.
+This perfectly mirrors the upstream Terraform foundation's `env_base` and `confidential_space` modules, demonstrating how applications and hardware-secured workloads are provisioned within the connected environments.
 
 ## Prerequisites
 
@@ -42,13 +43,20 @@ See [troubleshooting](../docs/TROUBLESHOOTING.md) if you run into issues during 
 
    ```bash
    pulumi config set env "development"
-   pulumi config set projects_stack_name "organization/vitruvian/4-projects/development"
+   pulumi config set projects_stack_name "VitruvianSoftware/foundation-4-projects/development"
+   pulumi config set network_stack_name "VitruvianSoftware/foundation-3-networks-svpc/development"
    ```
 
 1. (Optional) Override the default region:
 
    ```bash
    pulumi config set region "us-central1"   # default: us-central1
+   ```
+
+1. (Optional) Enable Confidential Space deployment by providing an image digest:
+
+   ```bash
+   pulumi config set confidential_image_digest "sha256:exampledigest"
    ```
 
 1. Preview and deploy:
@@ -64,26 +72,21 @@ See [troubleshooting](../docs/TROUBLESHOOTING.md) if you run into issues during 
 
 Same process as above — navigate, initialize, configure, and deploy.
 
-### Customizing the Application
-
-The sample application is intentionally minimal. To deploy your own workloads:
-
-1. Modify `main.go` to add your application-specific infrastructure
-2. Use the shared library components:
-   - `pkg/app` — For Cloud Run deployments
-   - `pkg/data` — For BigQuery data platform setups
-3. Add additional Pulumi config values as needed for your application
-
 ## Configuration Reference
 
 | Name | Description | Required | Default |
 |------|-------------|:--------:|---------|
 | `env` | Environment name (`development`, `nonproduction`, `production`) | ✅ | — |
-| `projects_stack_name` | Fully qualified Pulumi stack name of the 4-projects stage for this environment | ✅ | — |
-| `region` | Region for Cloud Run deployment | | `"us-central1"` |
+| `business_code` | Business Unit code (e.g. `bu1`) | | `"bu1"` |
+| `projects_stack_name` | Fully qualified Pulumi stack name of the 4-projects stage for this environment | | `VitruvianSoftware/foundation-4-projects/<env>` |
+| `network_stack_name` | Fully qualified Pulumi stack name of the 3-networks-svpc stage for this environment | | `VitruvianSoftware/foundation-3-networks-svpc/<env>` |
+| `region` | Region for the Compute Instances | | `"us-central1"` |
+| `confidential_image_digest` | SHA256 digest of the Docker image to be used for running the workload in Confidential Space | | — |
 
 ## File Structure
 
 | File | Description |
 |------|-------------|
-| `main.go` | Resolves project IDs from Stage 4 via Stack Reference, deploys Cloud Run app and BigQuery dataset using the shared library components |
+| `main.go` | Resolves outputs from previous stages and coordinates deployment of instances. |
+| `env_base.go` | Deploys standard Compute Instances with Service Accounts and IAP tag bindings. |
+| `confidential_space.go` | Deploys Confidential Space VMs and Workload Identity components for attestation. |
