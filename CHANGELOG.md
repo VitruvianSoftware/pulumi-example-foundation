@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Migrated shared components to [pulumi-library](https://github.com/VitruvianSoftware/pulumi-library)
+- Migrated shared components to [pulumi-library](https://github.com/VitruvianSoftware/pulumi-library/go)
 
 ### Security
 

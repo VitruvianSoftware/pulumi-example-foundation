@@ -81,11 +81,11 @@ Downstream stages read outputs from upstream stages via [Pulumi Stack References
 
 ### Pulumi Library
 
-This foundation uses the [Vitruvian Software Pulumi Library](https://github.com/VitruvianSoftware/pulumi-library) for standardized GCP components. When copying stage code to your repository, update the `go.mod` to reference the published library:
+This foundation uses the [Vitruvian Software Pulumi Library](https://github.com/VitruvianSoftware/pulumi-library/go) for standardized GCP components. When copying stage code to your repository, update the `go.mod` to reference the published library:
 
 ```bash
 # Remove the local filesystem replace directive
-go mod edit -dropreplace github.com/VitruvianSoftware/pulumi-library
+go mod edit -dropreplace github.com/VitruvianSoftware/pulumi-library/go
 
 # Fetch the published version
 go mod tidy
@@ -145,7 +145,7 @@ The bootstrap stage creates the Seed project (state storage, KMS encryption, ser
 7. Update the Go module to use the published Pulumi Library:
 
    ```bash
-   go mod edit -dropreplace github.com/VitruvianSoftware/pulumi-library
+   go mod edit -dropreplace github.com/VitruvianSoftware/pulumi-library/go
    go mod tidy
    ```
 
@@ -279,7 +279,7 @@ The organization stage creates the folder structure, shared projects (logging, b
 5. Update Go module:
 
    ```bash
-   go mod edit -dropreplace github.com/VitruvianSoftware/pulumi-library
+   go mod edit -dropreplace github.com/VitruvianSoftware/pulumi-library/go
    go mod tidy
    ```
 
@@ -381,7 +381,7 @@ The environments stage creates per-environment folders, KMS projects, and Secret
 5. Update Go module:
 
    ```bash
-   go mod edit -dropreplace github.com/VitruvianSoftware/pulumi-library
+   go mod edit -dropreplace github.com/VitruvianSoftware/pulumi-library/go
    go mod tidy
    ```
 
@@ -586,7 +586,7 @@ The pipeline uses the **branch name as the Pulumi stack name**:
 
 ## Using the Shared Library
 
-All stages use the [Vitruvian Software Pulumi Library](https://github.com/VitruvianSoftware/pulumi-library) for standardized GCP components:
+All stages use the [Vitruvian Software Pulumi Library](https://github.com/VitruvianSoftware/pulumi-library/go) for standardized GCP components:
 
 | Package | Description |
 |---------|-------------|
@@ -620,6 +620,6 @@ If `go mod tidy` fails in your repository, ensure you have removed the local
 filesystem `replace` directive from `go.mod`:
 
 ```bash
-go mod edit -dropreplace github.com/VitruvianSoftware/pulumi-library
+go mod edit -dropreplace github.com/VitruvianSoftware/pulumi-library/go
 go mod tidy
 ```

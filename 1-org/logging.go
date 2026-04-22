@@ -17,7 +17,7 @@
 package main
 
 import (
-	"github.com/VitruvianSoftware/pulumi-library/pkg/logging"
+	"github.com/VitruvianSoftware/pulumi-library/go/pkg/logging"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/bigquery"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )

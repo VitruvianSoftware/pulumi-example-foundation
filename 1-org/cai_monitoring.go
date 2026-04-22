@@ -19,7 +19,7 @@ package main
 import (
 	"fmt"
 
-	libsecurity "github.com/VitruvianSoftware/pulumi-library/pkg/security"
+	libsecurity "github.com/VitruvianSoftware/pulumi-library/go/pkg/security"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )
 

@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/VitruvianSoftware/pulumi-library/pkg/iam"
+	"github.com/VitruvianSoftware/pulumi-library/go/pkg/iam"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/serviceaccount"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/storage"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"

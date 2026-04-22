@@ -19,7 +19,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/VitruvianSoftware/pulumi-library/pkg/policy"
+	"github.com/VitruvianSoftware/pulumi-library/go/pkg/policy"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/accesscontextmanager"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )

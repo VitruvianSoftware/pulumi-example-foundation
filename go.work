@@ -1,7 +1,7 @@
 go 1.26.1
 
 use (
-	../pulumi-library
+	../pulumi-library/go
 	./0-bootstrap
 	./1-org
 	./2-environments

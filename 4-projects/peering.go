@@ -19,8 +19,8 @@ package main
 import (
 	"fmt"
 
-	libnet "github.com/VitruvianSoftware/pulumi-library/pkg/networking"
-	libproject "github.com/VitruvianSoftware/pulumi-library/pkg/project"
+	libnet "github.com/VitruvianSoftware/pulumi-library/go/pkg/networking"
+	libproject "github.com/VitruvianSoftware/pulumi-library/go/pkg/project"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/compute"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/dns"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/tags"

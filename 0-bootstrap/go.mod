@@ -2,10 +2,10 @@ module foundation-0-bootstrap
 
 go 1.26.1
 
-replace github.com/VitruvianSoftware/pulumi-library => /Users/james/Workspace/gh/infrastructure/vitruvian/pulumi-library
+replace github.com/VitruvianSoftware/pulumi-library/go => /Users/james/Workspace/gh/infrastructure/vitruvian/pulumi-library/go
 
 require (
-	github.com/VitruvianSoftware/pulumi-library v0.0.0-00010101000000-000000000000
+	github.com/VitruvianSoftware/pulumi-library/go v0.0.0-00010101000000-000000000000
 	github.com/pulumi/pulumi-gcp/sdk/v9 v9.20.0
 	github.com/pulumi/pulumi-github/sdk/v6 v6.12.2
 	github.com/pulumi/pulumi/sdk/v3 v3.231.0

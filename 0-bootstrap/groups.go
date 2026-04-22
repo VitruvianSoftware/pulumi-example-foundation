@@ -17,7 +17,7 @@
 package main
 
 import (
-	"github.com/VitruvianSoftware/pulumi-library/pkg/group"
+	"github.com/VitruvianSoftware/pulumi-library/go/pkg/group"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/organizations"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )

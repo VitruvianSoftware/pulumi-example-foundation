@@ -19,7 +19,7 @@ package main
 import (
 	"fmt"
 
-	libproject "github.com/VitruvianSoftware/pulumi-library/pkg/project"
+	libproject "github.com/VitruvianSoftware/pulumi-library/go/pkg/project"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/kms"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/storage"
 	"github.com/pulumi/pulumi-random/sdk/v4/go/random"
