@@ -21,6 +21,7 @@ import (
 
 	"github.com/VitruvianSoftware/pulumi-library/pkg/bootstrap"
 	"github.com/VitruvianSoftware/pulumi-library/pkg/project"
+	libstorage "github.com/VitruvianSoftware/pulumi-library/pkg/storage"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/storage"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )
@@ -114,15 +115,13 @@ func deploySeedProject(ctx *pulumi.Context, cfg *Config, folderID pulumi.StringO
 		return fmt.Sprintf("%s-%s-gcp-projects-tfstate", cfg.BucketPrefix, id)
 	}).(pulumi.StringOutput)
 
-	projectsStateBucket, err := storage.NewBucket(ctx, "projects-state-bucket", &storage.BucketArgs{
-		Name:                     projectsBucketName,
-		Project:                  b.SeedProjectID,
-		Location:                 pulumi.String(cfg.DefaultRegion),
-		ForceDestroy:             pulumi.Bool(cfg.BucketForceDestroy),
-		UniformBucketLevelAccess: pulumi.Bool(true),
-		Versioning: &storage.BucketVersioningArgs{
-			Enabled: pulumi.Bool(true),
-		},
+	enabled := true
+	projectsStateBucket, err := libstorage.NewSimpleBucket(ctx, "projects-state-bucket", &libstorage.SimpleBucketArgs{
+		Name:         projectsBucketName,
+		ProjectID:    b.SeedProjectID,
+		Location:     pulumi.String(cfg.DefaultRegion),
+		ForceDestroy: pulumi.Bool(cfg.BucketForceDestroy),
+		Versioning:   &enabled,
 		Encryption: &storage.BucketEncryptionArgs{
 			DefaultKmsKeyName: b.KMSKeyID,
 		},
@@ -134,7 +133,7 @@ func deploySeedProject(ctx *pulumi.Context, cfg *Config, folderID pulumi.StringO
 	return &SeedProject{
 		ProjectID:               b.SeedProjectID,
 		StateBucketName:         b.StateBucketName,
-		ProjectsStateBucketName: projectsStateBucket.Name,
+		ProjectsStateBucketName: projectsStateBucket.Bucket.Name,
 		KMSKeyID:                b.KMSKeyID,
 	}, nil
 }
