@@ -17,8 +17,8 @@
 package main
 
 import (
-	"github.com/VitruvianSoftware/pulumi-library/pkg/app"
-	"github.com/VitruvianSoftware/pulumi-library/pkg/data"
+	"fmt"
+
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi/config"
 )
@@ -28,10 +28,6 @@ func main() {
 		cfg := loadAppInfraConfig(ctx)
 
 		// 1. Resolve Project IDs from the Stage 4 stack.
-		// Stage 4 exports: svpc_project_id, floating_project_id,
-		// peering_project_id, infra_pipeline_project_id.
-		// We use the SVPC project for the app and the floating project for data,
-		// matching a typical pattern where apps run in the VPC-attached project.
 		projStack, err := pulumi.NewStackReference(ctx, "projects", &pulumi.StackReferenceArgs{
 			Name: pulumi.String(cfg.ProjectsStackName),
 		})
@@ -39,29 +35,83 @@ func main() {
 			return err
 		}
 
-		// Use GetStringOutput (returns a typed StringOutput) instead of
-		// GetOutput + unsafe type assertion which panics on nil.
-		appProjectID := projStack.GetStringOutput(pulumi.String("svpc_project_id"))
-		dataProjectID := projStack.GetStringOutput(pulumi.String("floating_project_id"))
-
-		// 2. Deploy Data Platform using the reusable Data component
-		_, err = data.NewDataPlatform(ctx, "airline-data", &data.DataPlatformArgs{
-			ProjectID: dataProjectID,
-			Location:  pulumi.String("US"),
+		// 1b. Resolve bootstrap stack
+		bootstrapStack, err := pulumi.NewStackReference(ctx, "bootstrap", &pulumi.StackReferenceArgs{
+			Name: pulumi.String(fmt.Sprintf("VitruvianSoftware/foundation-0-bootstrap/%s", cfg.Env)),
 		})
 		if err != nil {
 			return err
 		}
 
-		// 3. Deploy Web App using the reusable App component (Cloud Run v2)
-		_, err = app.NewCloudRunApp(ctx, "chat-demo", &app.CloudRunAppArgs{
-			ProjectID: appProjectID,
-			Name:      pulumi.String("chat-demo"),
-			Image:     pulumi.String("us-docker.pkg.dev/cloudrun/container/hello"),
-			Region:    pulumi.String(cfg.Region),
+		appProjectID := projStack.GetStringOutput(pulumi.String("svpc_project_id"))
+		peeringProjectID := projStack.GetStringOutput(pulumi.String("peering_project_id"))
+		confSpaceProjectID := projStack.GetStringOutput(pulumi.String("confidential_space_project_id"))
+		confSpaceWorkloadSA := projStack.GetStringOutput(pulumi.String("confidential_space_workload_sa"))
+		iapFirewallTags := projStack.GetOutput(pulumi.String("iap_firewall_tags")).ApplyT(func(v interface{}) map[string]string {
+			m := make(map[string]string)
+			if v == nil {
+				return m
+			}
+			if vm, ok := v.(map[string]interface{}); ok {
+				for key, val := range vm {
+					m[key] = fmt.Sprintf("%v", val)
+				}
+			}
+			return m
+		}).(pulumi.StringMapOutput)
+		peeringSubnetSelfLink := projStack.GetStringOutput(pulumi.String("peering_subnetwork_self_link"))
+		networkProjectID := projStack.GetStringOutput(pulumi.String("network_project_id"))
+		cicdProjectID := bootstrapStack.GetStringOutput(pulumi.String("cicd_project_id"))
+
+		// Reconstruct SVPC subnet self link
+		svpcSubnetSelfLink := pulumi.Sprintf("projects/%s/regions/%s/subnetworks/sb-%s-svpc-%s", networkProjectID, cfg.Region, cfg.EnvCode, cfg.Region)
+
+		// 2. Deploy SVPC Instance
+		err = deployEnvBase(ctx, "sample-svpc", &EnvBaseArgs{
+			Env:                cfg.Env,
+			BusinessUnit:       cfg.BusinessCode,
+			ProjectSuffix:      "sample-svpc",
+			ProjectID:          appProjectID,
+			Region:             cfg.Region,
+			SubnetworkSelfLink: svpcSubnetSelfLink,
+			IAPFirewallTags:    nil, // No tags for SVPC
 		})
 		if err != nil {
 			return err
+		}
+
+		// 3. Deploy Peering Instance
+		err = deployEnvBase(ctx, "sample-peering", &EnvBaseArgs{
+			Env:                cfg.Env,
+			BusinessUnit:       cfg.BusinessCode,
+			ProjectSuffix:      "sample-peering",
+			ProjectID:          peeringProjectID,
+			Region:             cfg.Region,
+			SubnetworkSelfLink: peeringSubnetSelfLink,
+			IAPFirewallTags:    iapFirewallTags,
+		})
+		if err != nil {
+			return err
+		}
+
+		// 4. Deploy Confidential Space
+		if cfg.ConfidentialImageDigest != "" {
+			err = deployConfidentialSpace(ctx, "conf-space", &ConfidentialSpaceArgs{
+				Env:                      cfg.Env,
+				BusinessUnit:             cfg.BusinessCode,
+				ProjectID:                confSpaceProjectID,
+				Region:                   cfg.Region,
+				SubnetworkSelfLink:       svpcSubnetSelfLink,
+				WorkloadSAEmail:          confSpaceWorkloadSA,
+				ConfidentialImageDigest:  cfg.ConfidentialImageDigest,
+				ConfidentialMachineType:  "n2d-standard-2",
+				ConfidentialInstanceType: "SEV",
+				CpuPlatform:              "AMD Milan",
+				CloudBuildProjectID:      cicdProjectID,
+			})
+			if err != nil {
+				return err
+			}
 		}
 
 		return nil
@@ -69,20 +119,41 @@ func main() {
 }
 
 type AppInfraConfig struct {
-	Env               string
-	Region            string
-	ProjectsStackName string
+	Env                     string
+	EnvCode                 string
+	BusinessCode            string
+	Region                  string
+	ProjectsStackName       string
+	NetworkStackName        string
+	ConfidentialImageDigest string
 }
 
 func loadAppInfraConfig(ctx *pulumi.Context) *AppInfraConfig {
 	conf := config.New(ctx, "")
 	c := &AppInfraConfig{
-		Env:               conf.Require("env"),
-		Region:            conf.Get("region"),
-		ProjectsStackName: conf.Require("projects_stack_name"),
+		Env:                     conf.Require("env"),
+		BusinessCode:            conf.Get("business_code"),
+		Region:                  conf.Get("region"),
+		ProjectsStackName:       conf.Get("projects_stack_name"),
+		NetworkStackName:        conf.Get("network_stack_name"),
+		ConfidentialImageDigest: conf.Get("confidential_image_digest"),
 	}
 	if c.Region == "" {
 		c.Region = "us-central1"
+	}
+	if c.BusinessCode == "" {
+		c.BusinessCode = "bu1"
+	}
+	if c.ProjectsStackName == "" {
+		c.ProjectsStackName = fmt.Sprintf("VitruvianSoftware/foundation-4-projects/%s", c.Env)
+	}
+	if c.NetworkStackName == "" {
+		c.NetworkStackName = fmt.Sprintf("VitruvianSoftware/foundation-3-networks-svpc/%s", c.Env)
+	}
+	envCodes := map[string]string{"development": "d", "nonproduction": "n", "production": "p"}
+	c.EnvCode = envCodes[c.Env]
+	if c.EnvCode == "" {
+		c.EnvCode = c.Env[:1]
 	}
 	return c
 }
