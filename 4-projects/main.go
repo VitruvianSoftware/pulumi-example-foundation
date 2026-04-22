@@ -96,6 +96,7 @@ func main() {
 				return err
 			}
 			projects.ConfSpaceProjectID = &confResult.ProjectID
+			projects.ConfSpaceProjectNumber = &confResult.ProjectNumber
 			projects.ConfSpaceWorkloadSA = &confResult.WorkloadSAEmail
 		}
 
@@ -122,6 +123,7 @@ func main() {
 		}
 		if projects.ConfSpaceProjectID != nil {
 			ctx.Export("confidential_space_project_id", *projects.ConfSpaceProjectID)
+			ctx.Export("confidential_space_project_number", *projects.ConfSpaceProjectNumber)
 			ctx.Export("confidential_space_workload_sa", *projects.ConfSpaceWorkloadSA)
 		}
 

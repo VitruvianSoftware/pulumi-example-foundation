@@ -1,3 +1,19 @@
+/*
+ * Copyright 2026 Vitruvian Software
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package main
 
 import (
@@ -5,37 +21,38 @@ import (
 
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/compute"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/iam"
-	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/organizations"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/serviceaccount"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )
 
+// ConfidentialSpaceArgs configures a Confidential Space VM deployment,
+// matching the upstream Terraform confidential_space module.
 type ConfidentialSpaceArgs struct {
-	Env                      string
-	BusinessUnit             string
-	ProjectID                pulumi.StringInput
-	Region                   string
-	SubnetworkSelfLink       pulumi.StringInput
-	WorkloadSAEmail          pulumi.StringInput
-	ConfidentialImageDigest  string
-	ConfidentialMachineType  string
+	Env                     string
+	BusinessUnit            string
+	ProjectID               pulumi.StringInput
+	ProjectNumber           pulumi.StringInput // from 4-projects stack export
+	Region                  string
+	SubnetworkSelfLink      pulumi.StringInput
+	WorkloadSAEmail         pulumi.StringInput
+	ConfidentialImageDigest string
+	ConfidentialMachineType string
 	ConfidentialInstanceType string
-	CpuPlatform              string
-	CloudBuildProjectID      pulumi.StringInput
+	CpuPlatform             string
+	CloudBuildProjectID     pulumi.StringInput
 }
 
-func deployConfidentialSpace(ctx *pulumi.Context, name string, args *ConfidentialSpaceArgs) error {
-	// 0. Get Project Number
-	projectNum := args.ProjectID.ToStringOutput().ApplyT(func(id string) (string, error) {
-		proj, err := organizations.LookupProject(ctx, &organizations.LookupProjectArgs{
-			ProjectId: &id,
-		})
-		if err != nil {
-			return "", err
-		}
-		return proj.Number, nil
-	}).(pulumi.StringOutput)
+// ConfidentialSpaceResult holds outputs from the Confidential Space deployment.
+type ConfidentialSpaceResult struct {
+	InstanceSelfLink       pulumi.StringOutput
+	WorkloadPoolID         pulumi.StringOutput
+	WorkloadPoolProviderID pulumi.StringOutput
+}
 
+// deployConfidentialSpace creates a Workload Identity Pool, OIDC attestation
+// provider, IAM bindings, and a Confidential VM, matching the upstream
+// Terraform foundation's confidential_space module.
+func deployConfidentialSpace(ctx *pulumi.Context, name string, args *ConfidentialSpaceArgs) (*ConfidentialSpaceResult, error) {
 	// 1. Workload Identity Pool
 	pool, err := iam.NewWorkloadIdentityPool(ctx, name+"-pool", &iam.WorkloadIdentityPoolArgs{
 		WorkloadIdentityPoolId: pulumi.String("confidential-space-pool"),
@@ -43,12 +60,16 @@ func deployConfidentialSpace(ctx *pulumi.Context, name string, args *Confidentia
 		Project:                args.ProjectID,
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	// 2. Workload Identity Pool Provider
+	// 2. Workload Identity Pool Provider — OIDC attestation verifier
+	// Attribute condition matches upstream's attribute_condition heredoc exactly.
 	attributeCondition := args.WorkloadSAEmail.ToStringOutput().ApplyT(func(saEmail string) string {
-		return fmt.Sprintf(`assertion.submods.container.image_digest == "%s" && "%s" in assertion.google_service_accounts && assertion.swname == "CONFIDENTIAL_SPACE" && "STABLE" in assertion.submods.confidential_space.support_attributes`, args.ConfidentialImageDigest, saEmail)
+		return fmt.Sprintf(
+			`assertion.submods.container.image_digest == "%s" && "%s" in assertion.google_service_accounts && assertion.swname == "CONFIDENTIAL_SPACE" && "STABLE" in assertion.submods.confidential_space.support_attributes`,
+			args.ConfidentialImageDigest, saEmail,
+		)
 	}).(pulumi.StringOutput)
 
 	provider, err := iam.NewWorkloadIdentityPoolProvider(ctx, name+"-provider", &iam.WorkloadIdentityPoolProviderArgs{
@@ -68,12 +89,18 @@ func deployConfidentialSpace(ctx *pulumi.Context, name string, args *Confidentia
 		AttributeCondition: attributeCondition,
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// 3. IAM Binding for the Workload SA
-	member := projectNum.ApplyT(func(num string) string {
-		return fmt.Sprintf("principalSet://iam.googleapis.com/projects/%s/locations/global/workloadIdentityPools/confidential-space-pool/*", num)
+	// Uses the project number from the 4-projects stack export — NOT a
+	// runtime LookupProject call (which would be a Pulumi anti-pattern
+	// breaking previews).
+	member := args.ProjectNumber.ToStringOutput().ApplyT(func(num string) string {
+		return fmt.Sprintf(
+			"principalSet://iam.googleapis.com/projects/%s/locations/global/workloadIdentityPools/confidential-space-pool/*",
+			num,
+		)
 	}).(pulumi.StringOutput)
 
 	serviceAccountID := pulumi.All(args.ProjectID, args.WorkloadSAEmail).ApplyT(func(a []interface{}) string {
@@ -86,15 +113,15 @@ func deployConfidentialSpace(ctx *pulumi.Context, name string, args *Confidentia
 		Member:           member,
 	}, pulumi.DependsOn([]pulumi.Resource{provider}))
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	// 4. Confidential VM
+	// 4. Confidential VM — TEE image reference from CI/CD project's Artifact Registry
 	defaultTeeImageRef := args.CloudBuildProjectID.ToStringOutput().ApplyT(func(cbID string) string {
 		return fmt.Sprintf("%s-docker.pkg.dev/%s/tf-runners/confidential_space_image:latest", args.Region, cbID)
 	}).(pulumi.StringOutput)
 
-	_, err = compute.NewInstance(ctx, name+"-vm", &compute.InstanceArgs{
+	inst, err := compute.NewInstance(ctx, name+"-vm", &compute.InstanceArgs{
 		Project:        args.ProjectID,
 		Name:           pulumi.String("confidential-instance"),
 		MachineType:    pulumi.String(args.ConfidentialMachineType),
@@ -127,5 +154,13 @@ func deployConfidentialSpace(ctx *pulumi.Context, name string, args *Confidentia
 			"tee-image-reference": defaultTeeImageRef,
 		},
 	})
-	return err
+	if err != nil {
+		return nil, err
+	}
+
+	return &ConfidentialSpaceResult{
+		InstanceSelfLink:       inst.SelfLink,
+		WorkloadPoolID:         pool.WorkloadIdentityPoolId,
+		WorkloadPoolProviderID: provider.WorkloadIdentityPoolProviderId,
+	}, nil
 }

@@ -18,6 +18,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi/config"
@@ -27,7 +28,7 @@ func main() {
 	pulumi.Run(func(ctx *pulumi.Context) error {
 		cfg := loadAppInfraConfig(ctx)
 
-		// 1. Resolve Project IDs from the Stage 4 stack.
+		// 1. Stack Reference: 4-projects (per-environment)
 		projStack, err := pulumi.NewStackReference(ctx, "projects", &pulumi.StackReferenceArgs{
 			Name: pulumi.String(cfg.ProjectsStackName),
 		})
@@ -35,18 +36,25 @@ func main() {
 			return err
 		}
 
-		// 1b. Resolve bootstrap stack
+		// 2. Stack Reference: 0-bootstrap (shared / common — not per-environment)
 		bootstrapStack, err := pulumi.NewStackReference(ctx, "bootstrap", &pulumi.StackReferenceArgs{
-			Name: pulumi.String(fmt.Sprintf("VitruvianSoftware/foundation-0-bootstrap/%s", cfg.Env)),
+			Name: pulumi.String(cfg.BootstrapStackName),
 		})
 		if err != nil {
 			return err
 		}
 
+		// --- Resolve outputs from 4-projects ---
 		appProjectID := projStack.GetStringOutput(pulumi.String("svpc_project_id"))
 		peeringProjectID := projStack.GetStringOutput(pulumi.String("peering_project_id"))
 		confSpaceProjectID := projStack.GetStringOutput(pulumi.String("confidential_space_project_id"))
+		confSpaceProjectNumber := projStack.GetStringOutput(pulumi.String("confidential_space_project_number"))
 		confSpaceWorkloadSA := projStack.GetStringOutput(pulumi.String("confidential_space_workload_sa"))
+		peeringSubnetSelfLink := projStack.GetStringOutput(pulumi.String("peering_subnetwork_self_link"))
+		networkProjectID := projStack.GetStringOutput(pulumi.String("network_project_id"))
+
+		// IAP firewall tags come as a map[string]interface{} from stack references;
+		// convert to map[string]string for the Compute Instance params.
 		iapFirewallTags := projStack.GetOutput(pulumi.String("iap_firewall_tags")).ApplyT(func(v interface{}) map[string]string {
 			m := make(map[string]string)
 			if v == nil {
@@ -59,32 +67,37 @@ func main() {
 			}
 			return m
 		}).(pulumi.StringMapOutput)
-		peeringSubnetSelfLink := projStack.GetStringOutput(pulumi.String("peering_subnetwork_self_link"))
-		networkProjectID := projStack.GetStringOutput(pulumi.String("network_project_id"))
+
+		// --- Resolve outputs from 0-bootstrap ---
 		cicdProjectID := bootstrapStack.GetStringOutput(pulumi.String("cicd_project_id"))
 
-		// Reconstruct SVPC subnet self link
-		svpcSubnetSelfLink := pulumi.Sprintf("projects/%s/regions/%s/subnetworks/sb-%s-svpc-%s", networkProjectID, cfg.Region, cfg.EnvCode, cfg.Region)
+		// Reconstruct SVPC subnet self link from deterministic naming convention
+		svpcSubnetSelfLink := pulumi.Sprintf(
+			"projects/%s/regions/%s/subnetworks/sb-%s-svpc-%s",
+			networkProjectID, cfg.Region, cfg.EnvCode, cfg.Region,
+		)
 
-		// 2. Deploy SVPC Instance
-		err = deployEnvBase(ctx, "sample-svpc", &EnvBaseArgs{
+		// 3. Deploy SVPC Instance (upstream: module "gce_instance" with project_suffix = "sample-svpc")
+		svpcResult, err := deployEnvBase(ctx, "sample-svpc", &EnvBaseArgs{
 			Env:                cfg.Env,
 			BusinessUnit:       cfg.BusinessCode,
 			ProjectSuffix:      "sample-svpc",
+			Hostname:           "example-app",
 			ProjectID:          appProjectID,
 			Region:             cfg.Region,
 			SubnetworkSelfLink: svpcSubnetSelfLink,
-			IAPFirewallTags:    nil, // No tags for SVPC
+			IAPFirewallTags:    nil, // No tags for SVPC (upstream: null)
 		})
 		if err != nil {
 			return err
 		}
 
-		// 3. Deploy Peering Instance
-		err = deployEnvBase(ctx, "sample-peering", &EnvBaseArgs{
+		// 4. Deploy Peering Instance (upstream: module "peering_gce_instance" with project_suffix = "sample-peering")
+		peeringResult, err := deployEnvBase(ctx, "sample-peering", &EnvBaseArgs{
 			Env:                cfg.Env,
 			BusinessUnit:       cfg.BusinessCode,
 			ProjectSuffix:      "sample-peering",
+			Hostname:           "example-app",
 			ProjectID:          peeringProjectID,
 			Region:             cfg.Region,
 			SubnetworkSelfLink: peeringSubnetSelfLink,
@@ -94,19 +107,21 @@ func main() {
 			return err
 		}
 
-		// 4. Deploy Confidential Space
+		// 5. Deploy Confidential Space (upstream: module "confidential_space")
+		var confResult *ConfidentialSpaceResult
 		if cfg.ConfidentialImageDigest != "" {
-			err = deployConfidentialSpace(ctx, "conf-space", &ConfidentialSpaceArgs{
+			confResult, err = deployConfidentialSpace(ctx, "conf-space", &ConfidentialSpaceArgs{
 				Env:                      cfg.Env,
 				BusinessUnit:             cfg.BusinessCode,
 				ProjectID:                confSpaceProjectID,
+				ProjectNumber:            confSpaceProjectNumber,
 				Region:                   cfg.Region,
 				SubnetworkSelfLink:       svpcSubnetSelfLink,
 				WorkloadSAEmail:          confSpaceWorkloadSA,
 				ConfidentialImageDigest:  cfg.ConfidentialImageDigest,
 				ConfidentialMachineType:  "n2d-standard-2",
 				ConfidentialInstanceType: "SEV",
-				CpuPlatform:              "AMD Milan",
+				CpuPlatform:             "AMD Milan",
 				CloudBuildProjectID:      cicdProjectID,
 			})
 			if err != nil {
@@ -114,28 +129,42 @@ func main() {
 			}
 		}
 
+		// 6. Exports — matching upstream outputs.tf
+		ctx.Export("project_id", appProjectID)
+		ctx.Export("region", pulumi.String(cfg.Region))
+		ctx.Export("instances_self_links", svpcResult.InstanceSelfLink)
+		ctx.Export("peering_instances_self_links", peeringResult.InstanceSelfLink)
+
+		if confResult != nil {
+			ctx.Export("confidential_space_project_id", confSpaceProjectID)
+			ctx.Export("confidential_space_project_number", confSpaceProjectNumber)
+			ctx.Export("workload_identity_pool_id", confResult.WorkloadPoolID)
+			ctx.Export("workload_pool_provider_id", confResult.WorkloadPoolProviderID)
+			ctx.Export("confidential_instances_self_links", confResult.InstanceSelfLink)
+		}
+
 		return nil
 	})
 }
 
 type AppInfraConfig struct {
-	Env                     string
-	EnvCode                 string
-	BusinessCode            string
-	Region                  string
-	ProjectsStackName       string
-	NetworkStackName        string
+	Env                    string
+	EnvCode                string
+	BusinessCode           string
+	Region                 string
+	ProjectsStackName      string
+	BootstrapStackName     string
 	ConfidentialImageDigest string
 }
 
 func loadAppInfraConfig(ctx *pulumi.Context) *AppInfraConfig {
 	conf := config.New(ctx, "")
 	c := &AppInfraConfig{
-		Env:                     conf.Require("env"),
-		BusinessCode:            conf.Get("business_code"),
-		Region:                  conf.Get("region"),
-		ProjectsStackName:       conf.Get("projects_stack_name"),
-		NetworkStackName:        conf.Get("network_stack_name"),
+		Env:                    conf.Require("env"),
+		BusinessCode:           conf.Get("business_code"),
+		Region:                 conf.Get("region"),
+		ProjectsStackName:      conf.Get("projects_stack_name"),
+		BootstrapStackName:     conf.Get("bootstrap_stack_name"),
 		ConfidentialImageDigest: conf.Get("confidential_image_digest"),
 	}
 	if c.Region == "" {
@@ -147,8 +176,11 @@ func loadAppInfraConfig(ctx *pulumi.Context) *AppInfraConfig {
 	if c.ProjectsStackName == "" {
 		c.ProjectsStackName = fmt.Sprintf("VitruvianSoftware/foundation-4-projects/%s", c.Env)
 	}
-	if c.NetworkStackName == "" {
-		c.NetworkStackName = fmt.Sprintf("VitruvianSoftware/foundation-3-networks-svpc/%s", c.Env)
+	if c.BootstrapStackName == "" {
+		// Bootstrap is a shared stage — use the org_stack_name pattern with
+		// the same naming convention as other stages. Fall back to a
+		// default derived from the projects stack name.
+		c.BootstrapStackName = strings.Replace(c.ProjectsStackName, "foundation-4-projects/"+c.Env, "foundation-0-bootstrap/shared", 1)
 	}
 	envCodes := map[string]string{"development": "d", "nonproduction": "n", "production": "p"}
 	c.EnvCode = envCodes[c.Env]

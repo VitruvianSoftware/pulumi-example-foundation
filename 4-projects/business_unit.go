@@ -36,6 +36,7 @@ type BUProjects struct {
 	CMEKBucket             *pulumi.StringOutput
 	CMEKKeyring            *pulumi.StringOutput
 	ConfSpaceProjectID     *pulumi.StringOutput
+	ConfSpaceProjectNumber *pulumi.StringOutput
 	ConfSpaceWorkloadSA    *pulumi.StringOutput
 }
 
