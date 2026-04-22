@@ -85,8 +85,9 @@ type PerProjectBudget struct {
 
 // EnvProjectBudgetConfig mirrors the upstream project_budget variable for 2-environments.
 type EnvProjectBudgetConfig struct {
-	KMS    PerProjectBudget
-	Secret PerProjectBudget
+	SharedNetwork PerProjectBudget
+	KMS           PerProjectBudget
+	Secret        PerProjectBudget
 }
 
 // AssuredWorkloadConfig mirrors the upstream assured_workload_configuration variable.
@@ -156,6 +157,11 @@ func loadEnvConfig(ctx *pulumi.Context) *EnvConfig {
 	} else {
 		// Default budget values matching upstream tf variables.tf
 		c.ProjectBudget = &EnvProjectBudgetConfig{
+			SharedNetwork: PerProjectBudget{
+				Amount:             1000,
+				AlertSpentPercents: []float64{1.2},
+				AlertSpendBasis:    "FORECASTED_SPEND",
+			},
 			KMS: PerProjectBudget{
 				Amount:             1000,
 				AlertSpentPercents: []float64{1.2},
