@@ -23,6 +23,7 @@ import (
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/iam"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/serviceaccount"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
+	"github.com/pulumiverse/pulumi-time/sdk/go/time"
 )
 
 // ConfidentialSpaceArgs configures a Confidential Space VM deployment,
@@ -92,6 +93,16 @@ func deployConfidentialSpace(ctx *pulumi.Context, name string, args *Confidentia
 		return nil, err
 	}
 
+	// 2.5. Wait for Workload Identity Pool propagation
+	// Matches upstream's time_sleep.wait_workload_pool_propagation
+	// GCP IAM can take up to 60s to recognize the new pool's principal identifiers.
+	wait, err := time.NewSleep(ctx, name+"-wait-wip", &time.SleepArgs{
+		CreateDuration: pulumi.String("60s"),
+	}, pulumi.DependsOn([]pulumi.Resource{provider}))
+	if err != nil {
+		return nil, err
+	}
+
 	// 3. IAM Binding for the Workload SA
 	// Uses the project number from the 4-projects stack export — NOT a
 	// runtime LookupProject call (which would be a Pulumi anti-pattern
@@ -111,7 +122,7 @@ func deployConfidentialSpace(ctx *pulumi.Context, name string, args *Confidentia
 		ServiceAccountId: serviceAccountID,
 		Role:             pulumi.String("roles/iam.workloadIdentityUser"),
 		Member:           member,
-	}, pulumi.DependsOn([]pulumi.Resource{provider}))
+	}, pulumi.DependsOn([]pulumi.Resource{wait}))
 	if err != nil {
 		return nil, err
 	}

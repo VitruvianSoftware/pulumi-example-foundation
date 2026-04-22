@@ -56,9 +56,10 @@ func deployEnvBase(ctx *pulumi.Context, name string, args *EnvBaseArgs) (*EnvBas
 
 	// 1. Service Account — matching upstream's google_service_account.compute_engine_service_account
 	sa, err := serviceaccount.NewAccount(ctx, name+"-sa", &serviceaccount.AccountArgs{
-		AccountId:   pulumi.String("sa-example-app"),
-		DisplayName: pulumi.String("Example app service Account"),
-		Project:     args.ProjectID,
+		AccountId:                 pulumi.String("sa-example-app"),
+		DisplayName:               pulumi.String("Example app service Account"),
+		Project:                   args.ProjectID,
+		CreateIgnoreAlreadyExists: pulumi.Bool(true),
 	})
 	if err != nil {
 		return nil, err
