@@ -7,6 +7,7 @@ replace github.com/VitruvianSoftware/pulumi-library => /Users/james/Workspace/gh
 require (
 	github.com/pulumi/pulumi-gcp/sdk/v9 v9.20.0
 	github.com/pulumi/pulumi/sdk/v3 v3.231.0
+	github.com/pulumiverse/pulumi-time/sdk v0.1.0
 )
 
 require (
