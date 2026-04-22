@@ -46,7 +46,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/iam"
+	libcicd "github.com/VitruvianSoftware/pulumi-library/pkg/cicd"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/serviceaccount"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )
@@ -87,56 +87,8 @@ func deployGitLabBuild(ctx *pulumi.Context, cfg *Config, cicd *CICDProject, sas 
 	}
 
 	// ========================================================================
-	// 1. Workload Identity Pool
+	// 1-3. Workload Identity Pool, Provider, and Attribute Bindings
 	// ========================================================================
-	pool, err := iam.NewWorkloadIdentityPool(ctx, "foundation-wif-pool", &iam.WorkloadIdentityPoolArgs{
-		Project:                cicd.ProjectID,
-		WorkloadIdentityPoolId: pulumi.String("foundation-pool"),
-		DisplayName:            pulumi.String("Foundation CI/CD Pool"),
-		Description:            pulumi.String("Workload Identity Pool for GitLab CI/CD pipeline. Managed by Pulumi."),
-		Disabled:               pulumi.Bool(false),
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// ========================================================================
-	// 2. Workload Identity Pool OIDC Provider (GitLab)
-	// GitLab uses a different OIDC issuer and attribute mapping than GitHub:
-	//   - Issuer: https://gitlab.com (or self-hosted URL)
-	//   - Key attribute: project_path (e.g. "my-org/my-repo")
-	// ========================================================================
-	provider, err := iam.NewWorkloadIdentityPoolProvider(ctx, "foundation-wif-gl-provider", &iam.WorkloadIdentityPoolProviderArgs{
-		Project:                        cicd.ProjectID,
-		WorkloadIdentityPoolId:         pool.WorkloadIdentityPoolId,
-		WorkloadIdentityPoolProviderId: pulumi.String("foundation-gl-provider"),
-		DisplayName:                    pulumi.String("Foundation GitLab Provider"),
-		Description:                    pulumi.String("GitLab CI/CD OIDC provider for foundation pipelines. Managed by Pulumi."),
-		// Restrict to projects under the configured GitLab owner/group
-		AttributeCondition: pulumi.Sprintf("assertion.project_path.startsWith('%s/')", gitlabOwner),
-		AttributeMapping: pulumi.StringMap{
-			"google.subject":         pulumi.String("assertion.sub"),
-			"attribute.project_path": pulumi.String("assertion.project_path"),
-			"attribute.project_id":   pulumi.String("assertion.project_id"),
-			"attribute.namespace_id": pulumi.String("assertion.namespace_id"),
-			"attribute.ref":          pulumi.String("assertion.ref"),
-		},
-		Oidc: &iam.WorkloadIdentityPoolProviderOidcArgs{
-			// For self-hosted GitLab, change to your instance URL
-			IssuerUri: pulumi.String("https://gitlab.com"),
-		},
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// ========================================================================
-	// 3. SA → WIF Attribute Bindings
-	// Map each granular SA to a specific GitLab project via project_path.
-	// ========================================================================
-
-	// Map stage keys to their GitLab repo names
-	// (add these fields to Config struct and loadConfig)
 	stageRepos := map[string]string{
 		"bootstrap": "", // Replace with: cfg.GitLabRepoBootstrap
 		"org":       "", // Replace with: cfg.GitLabRepoOrg
@@ -145,25 +97,29 @@ func deployGitLabBuild(ctx *pulumi.Context, cfg *Config, cicd *CICDProject, sas 
 		"proj":      "", // Replace with: cfg.GitLabRepoProj
 	}
 
+	saMappings := make(map[string]libcicd.SAMappingEntry)
 	for key, sa := range sas {
 		repo := stageRepos[key]
 		if repo == "" {
 			continue
 		}
 
-		member := pulumi.Sprintf(
-			"principalSet://iam.googleapis.com/%s/attribute.project_path/%s/%s",
-			pool.Name, gitlabOwner, repo,
-		)
-
-		_, err := serviceaccount.NewIAMMember(ctx, fmt.Sprintf("wif-sa-binding-%s", key), &serviceaccount.IAMMemberArgs{
-			ServiceAccountId: sa.Name,
-			Role:             pulumi.String("roles/iam.workloadIdentityUser"),
-			Member:           member,
-		})
-		if err != nil {
-			return nil, err
+		saMappings[key] = libcicd.SAMappingEntry{
+			SAName:    sa.Name,
+			Attribute: pulumi.String(fmt.Sprintf("attribute.project_path/%s/%s", gitlabOwner, repo)),
 		}
+	}
+
+	gitlabOidc, err := libcicd.NewGitLabOIDC(ctx, "foundation-wif", &libcicd.GitLabOIDCArgs{
+		ProjectID:          cicd.ProjectID,
+		PoolID:             pulumi.String("foundation-pool"),
+		ProviderID:         pulumi.String("foundation-gl-provider"),
+		AttributeCondition: pulumi.String(fmt.Sprintf("assertion.project_path.startsWith('%s/')", gitlabOwner)),
+		SAMapping:          saMappings,
+		// IssuerUri defaults to https://gitlab.com if not set
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	// ========================================================================
@@ -188,8 +144,8 @@ func deployGitLabBuild(ctx *pulumi.Context, cfg *Config, cicd *CICDProject, sas 
 	// ========================================================================
 	// 5. Outputs
 	// ========================================================================
-	outputs.WIFPoolName = pool.Name
-	outputs.WIFProviderName = provider.Name
+	outputs.WIFPoolName = gitlabOidc.Pool.Name
+	outputs.WIFProviderName = gitlabOidc.Provider.Name
 
 	return outputs, nil
 }

@@ -20,7 +20,7 @@ import (
 	"fmt"
 
 	ghactions "github.com/pulumi/pulumi-github/sdk/v6/go/github"
-	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/iam"
+	libcicd "github.com/VitruvianSoftware/pulumi-library/pkg/cicd"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/serviceaccount"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )
@@ -55,25 +55,7 @@ func deployGitHubActionsBuild(ctx *pulumi.Context, cfg *Config, seed *SeedProjec
 	}
 
 	// ========================================================================
-	// 1. Workload Identity Pool
-	// A pool scoped to the CI/CD project that groups all GitHub-based
-	// identity providers.
-	// ========================================================================
-	pool, err := iam.NewWorkloadIdentityPool(ctx, "foundation-wif-pool", &iam.WorkloadIdentityPoolArgs{
-		Project:                cicd.ProjectID,
-		WorkloadIdentityPoolId: pulumi.String("foundation-pool"),
-		DisplayName:            pulumi.String("Foundation CI/CD Pool"),
-		Description:            pulumi.String("Workload Identity Pool for GitHub Actions CI/CD pipeline. Managed by Pulumi."),
-		Disabled:               pulumi.Bool(false),
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// ========================================================================
-	// 2. Workload Identity Pool OIDC Provider
-	// Configures GitHub Actions as an OIDC identity provider.
-	// The attribute_condition restricts tokens to the configured GitHub owner.
+	// 1-3. Workload Identity Pool, Provider, and Attribute Bindings
 	// ========================================================================
 	attributeCondition := cfg.WIFAttributeCondition
 	if attributeCondition == "" {
@@ -81,35 +63,6 @@ func deployGitHubActionsBuild(ctx *pulumi.Context, cfg *Config, seed *SeedProjec
 		attributeCondition = fmt.Sprintf("assertion.repository_owner=='%s'", cfg.GitHubOwner)
 	}
 
-	provider, err := iam.NewWorkloadIdentityPoolProvider(ctx, "foundation-wif-gh-provider", &iam.WorkloadIdentityPoolProviderArgs{
-		Project:                        cicd.ProjectID,
-		WorkloadIdentityPoolId:         pool.WorkloadIdentityPoolId,
-		WorkloadIdentityPoolProviderId: pulumi.String("foundation-gh-provider"),
-		DisplayName:                    pulumi.String("Foundation GitHub Provider"),
-		Description:                    pulumi.String("GitHub Actions OIDC provider for foundation pipelines. Managed by Pulumi."),
-		AttributeCondition:             pulumi.String(attributeCondition),
-		AttributeMapping: pulumi.StringMap{
-			"google.subject":       pulumi.String("assertion.sub"),
-			"attribute.actor":      pulumi.String("assertion.actor"),
-			"attribute.aud":        pulumi.String("assertion.aud"),
-			"attribute.repository": pulumi.String("assertion.repository"),
-		},
-		Oidc: &iam.WorkloadIdentityPoolProviderOidcArgs{
-			IssuerUri: pulumi.String("https://token.actions.githubusercontent.com"),
-		},
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// ========================================================================
-	// 3. SA → WIF Attribute Bindings
-	// Map each granular SA to a specific GitHub repository so that only the
-	// intended repo can impersonate the corresponding stage SA.
-	// Uses the attribute mapping: attribute.repository/{owner}/{repo}
-	// ========================================================================
-
-	// Map stage keys to their GitHub repo config values
 	stageRepos := map[string]string{
 		"bootstrap": cfg.GitHubRepoBootstrap,
 		"org":       cfg.GitHubRepoOrg,
@@ -118,37 +71,33 @@ func deployGitHubActionsBuild(ctx *pulumi.Context, cfg *Config, seed *SeedProjec
 		"proj":      cfg.GitHubRepoProj,
 	}
 
+	saMappings := make(map[string]libcicd.SAMappingEntry)
 	for key, sa := range sas {
 		repo := stageRepos[key]
-		if repo == "" {
-			// If no repo is configured for this stage, use a wildcard repo pattern
-			// scoped to the owner. This allows any repo under the owner to impersonate.
-			repo = "*"
-		}
-
-		var member pulumi.StringInput
-		if repo == "*" {
+		var attr string
+		if repo == "" || repo == "*" {
 			// Wildcard: any repo under this owner
-			member = pulumi.Sprintf(
-				"principalSet://iam.googleapis.com/%s/attribute.repository/%s",
-				pool.Name, cfg.GitHubOwner,
-			)
+			attr = fmt.Sprintf("attribute.repository/%s", cfg.GitHubOwner)
 		} else {
 			// Specific repo binding
-			member = pulumi.Sprintf(
-				"principalSet://iam.googleapis.com/%s/attribute.repository/%s/%s",
-				pool.Name, cfg.GitHubOwner, repo,
-			)
+			attr = fmt.Sprintf("attribute.repository/%s/%s", cfg.GitHubOwner, repo)
 		}
 
-		_, err := serviceaccount.NewIAMMember(ctx, fmt.Sprintf("wif-sa-binding-%s", key), &serviceaccount.IAMMemberArgs{
-			ServiceAccountId: sa.Name,
-			Role:             pulumi.String("roles/iam.workloadIdentityUser"),
-			Member:           member,
-		})
-		if err != nil {
-			return nil, err
+		saMappings[key] = libcicd.SAMappingEntry{
+			SAName:    sa.Name,
+			Attribute: pulumi.String(attr),
 		}
+	}
+
+	githubOidc, err := libcicd.NewGitHubOIDC(ctx, "foundation-wif", &libcicd.GitHubOIDCArgs{
+		ProjectID:          cicd.ProjectID,
+		PoolID:             pulumi.String("foundation-pool"),
+		ProviderID:         pulumi.String("foundation-gh-provider"),
+		AttributeCondition: pulumi.String(attributeCondition),
+		SAMapping:          saMappings,
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	// ========================================================================
@@ -189,7 +138,7 @@ func deployGitHubActionsBuild(ctx *pulumi.Context, cfg *Config, seed *SeedProjec
 		if _, err := ghactions.NewActionsSecret(ctx, fmt.Sprintf("gh-secret-%s-wif-provider", key), &ghactions.ActionsSecretArgs{
 			Repository:     pulumi.String(repo),
 			SecretName:     pulumi.String("WIF_PROVIDER_NAME"),
-			PlaintextValue: provider.Name,
+			PlaintextValue: githubOidc.Provider.Name,
 		}); err != nil {
 			return nil, err
 		}
@@ -225,8 +174,8 @@ func deployGitHubActionsBuild(ctx *pulumi.Context, cfg *Config, seed *SeedProjec
 	// ========================================================================
 	// 5. Outputs
 	// ========================================================================
-	outputs.WIFPoolName = pool.Name
-	outputs.WIFProviderName = provider.Name
+	outputs.WIFPoolName = githubOidc.Pool.Name
+	outputs.WIFProviderName = githubOidc.Provider.Name
 
 	return outputs, nil
 }
