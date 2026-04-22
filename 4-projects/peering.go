@@ -27,6 +27,14 @@ import (
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )
 
+// PeeringResult holds outputs from the peering network deployment.
+// These are exported by main.go to satisfy downstream dependencies in 5-app-infra.
+type PeeringResult struct {
+	NetworkSelfLink    pulumi.StringOutput
+	SubnetSelfLink     pulumi.StringOutput
+	IAPFirewallTags    pulumi.MapOutput // map of tagKey → tagValue for IAP access
+}
+
 // deployPeeringNetwork creates the full peering network infrastructure for the
 // peering project, matching upstream's example_peering_project.tf (305 lines).
 //
@@ -41,7 +49,7 @@ func deployPeeringNetwork(
 	cfg *ProjectsConfig,
 	peeringProject *libproject.Project,
 	networkProjectID pulumi.StringOutput,
-) (pulumi.StringOutput, error) {
+) (*PeeringResult, error) {
 	projectID := peeringProject.Project.ProjectId
 	vpcName := fmt.Sprintf("vpc-%s-peering-base", cfg.EnvCode)
 
@@ -59,7 +67,7 @@ func deployPeeringNetwork(
 		},
 	})
 	if err != nil {
-		return pulumi.StringOutput{}, err
+		return nil, err
 	}
 
 	// 2. DNS Policy — inbound forwarding + logging
@@ -75,7 +83,7 @@ func deployPeeringNetwork(
 		},
 	}, pulumi.DependsOn([]pulumi.Resource{peeringVpc.VPC}))
 	if err != nil {
-		return pulumi.StringOutput{}, err
+		return nil, err
 	}
 
 	// 3. Bi-directional VPC Peering (peering project <-> shared VPC host)
@@ -89,7 +97,7 @@ func deployPeeringNetwork(
 		ImportCustomRoutes: pulumi.Bool(true),
 	})
 	if err != nil {
-		return pulumi.StringOutput{}, err
+		return nil, err
 	}
 
 	_, err = compute.NewNetworkPeering(ctx, "host-to-peering", &compute.NetworkPeeringArgs{
@@ -100,13 +108,17 @@ func deployPeeringNetwork(
 		ImportCustomRoutes: pulumi.Bool(false),
 	}, pulumi.DependsOn([]pulumi.Resource{peeringToHost}))
 	if err != nil {
-		return pulumi.StringOutput{}, err
+		return nil, err
 	}
+
+	var sshTagValueID, rdpTagValueID pulumi.StringInput
+	var sshTagKey, rdpTagKey *tags.TagKey
+	var sshTagValue, rdpTagValue *tags.TagValue
 
 	// 4. Secure Tags for IAP-based SSH and RDP access
 	if cfg.PeeringIAPFWEnabled {
 		// SSH tag key + value
-		sshTagKey, err := tags.NewTagKey(ctx, "peering-ssh-tag-key", &tags.TagKeyArgs{
+		sshTagKey, err = tags.NewTagKey(ctx, "peering-ssh-tag-key", &tags.TagKeyArgs{
 			ShortName: pulumi.String("ssh-iap-access"),
 			Parent:    pulumi.Sprintf("projects/%s", projectID),
 			Purpose:   pulumi.String("GCE_FIREWALL"),
@@ -115,19 +127,20 @@ func deployPeeringNetwork(
 			},
 		}, pulumi.DependsOn([]pulumi.Resource{peeringVpc.VPC}))
 		if err != nil {
-			return pulumi.StringOutput{}, err
+			return nil, err
 		}
 
-		_, err = tags.NewTagValue(ctx, "peering-ssh-tag-value", &tags.TagValueArgs{
+		sshTagValue, err = tags.NewTagValue(ctx, "peering-ssh-tag-value", &tags.TagValueArgs{
 			ShortName: pulumi.String("allow"),
-			Parent:    pulumi.Sprintf("tagKeys/%s", sshTagKey.Name),
+			Parent:    sshTagKey.ID(),
 		})
 		if err != nil {
-			return pulumi.StringOutput{}, err
+			return nil, err
 		}
+		sshTagValueID = sshTagValue.ID()
 
 		// RDP tag key + value
-		rdpTagKey, err := tags.NewTagKey(ctx, "peering-rdp-tag-key", &tags.TagKeyArgs{
+		rdpTagKey, err = tags.NewTagKey(ctx, "peering-rdp-tag-key", &tags.TagKeyArgs{
 			ShortName: pulumi.String("rdp-iap-access"),
 			Parent:    pulumi.Sprintf("projects/%s", projectID),
 			Purpose:   pulumi.String("GCE_FIREWALL"),
@@ -136,20 +149,21 @@ func deployPeeringNetwork(
 			},
 		}, pulumi.DependsOn([]pulumi.Resource{peeringVpc.VPC}))
 		if err != nil {
-			return pulumi.StringOutput{}, err
+			return nil, err
 		}
 
-		_, err = tags.NewTagValue(ctx, "peering-rdp-tag-value", &tags.TagValueArgs{
+		rdpTagValue, err = tags.NewTagValue(ctx, "peering-rdp-tag-value", &tags.TagValueArgs{
 			ShortName: pulumi.String("allow"),
-			Parent:    pulumi.Sprintf("tagKeys/%s", rdpTagKey.Name),
+			Parent:    rdpTagKey.ID(),
 		})
 		if err != nil {
-			return pulumi.StringOutput{}, err
+			return nil, err
 		}
+		rdpTagValueID = rdpTagValue.ID()
 	}
 
 	// 5. Firewall Policy — matching upstream's firewall_rules module
-	fwRules := buildPeeringFirewallRules(cfg)
+	fwRules := buildPeeringFirewallRules(cfg, sshTagValueID, rdpTagValueID)
 
 	_, err = libnet.NewNetworkFirewallPolicy(ctx, "peering-fw", &libnet.NetworkFirewallPolicyArgs{
 		ProjectID:  projectID,
@@ -161,16 +175,38 @@ func deployPeeringNetwork(
 		Rules: fwRules,
 	}, pulumi.DependsOn([]pulumi.Resource{peeringVpc.VPC}))
 	if err != nil {
-		return pulumi.StringOutput{}, err
+		return nil, err
 	}
 
-	return peeringVpc.VPC.SelfLink, nil
+	// Build result with all outputs needed by 5-app-infra
+	subnetName := fmt.Sprintf("sb-%s-%s-peered-%s", cfg.EnvCode, cfg.BusinessCode, cfg.SubnetRegion)
+	subnetSelfLink := pulumi.StringOutput{}
+	if sub, ok := peeringVpc.Subnets[subnetName]; ok {
+		subnetSelfLink = sub.SelfLink
+	}
+
+	// Build IAP firewall tags map (matching upstream outputs.tf:87-93)
+	iapTags := pulumi.Map{}.ToMapOutput()
+	if cfg.PeeringIAPFWEnabled && sshTagKey != nil && sshTagValue != nil && rdpTagKey != nil && rdpTagValue != nil {
+		iapTags = pulumi.All(sshTagKey.ID(), sshTagValue.ID(), rdpTagKey.ID(), rdpTagValue.ID()).ApplyT(func(args []interface{}) map[string]interface{} {
+			return map[string]interface{}{
+				args[0].(string): args[1].(string),
+				args[2].(string): args[3].(string),
+			}
+		}).(pulumi.MapOutput)
+	}
+
+	return &PeeringResult{
+		NetworkSelfLink: peeringVpc.VPC.SelfLink,
+		SubnetSelfLink:  subnetSelfLink,
+		IAPFirewallTags: iapTags,
+	}, nil
 }
 
 // buildPeeringFirewallRules constructs the peering project's firewall rules
 // using the library's FirewallRule struct with FirewallRuleMatch, matching
 // upstream's example_peering_project.tf rule set.
-func buildPeeringFirewallRules(cfg *ProjectsConfig) []libnet.FirewallRule {
+func buildPeeringFirewallRules(cfg *ProjectsConfig, sshTagID, rdpTagID pulumi.StringInput) []libnet.FirewallRule {
 	rules := []libnet.FirewallRule{
 		// Priority 65530: Deny all egress TCP/UDP
 		{
@@ -206,7 +242,7 @@ func buildPeeringFirewallRules(cfg *ProjectsConfig) []libnet.FirewallRule {
 	}
 
 	// IAP SSH rule (priority 1000)
-	if cfg.PeeringIAPFWEnabled {
+	if cfg.PeeringIAPFWEnabled && sshTagID != nil && rdpTagID != nil {
 		rules = append(rules, libnet.FirewallRule{
 			Priority:      1000,
 			Direction:     "INGRESS",
@@ -214,6 +250,9 @@ func buildPeeringFirewallRules(cfg *ProjectsConfig) []libnet.FirewallRule {
 			RuleName:      fmt.Sprintf("fw-%s-peering-base-1000-i-a-all-allow-iap-ssh-tcp-22", cfg.EnvCode),
 			Description:   "Allow SSH via IAP for tagged instances.",
 			EnableLogging: true,
+			TargetSecureTags: []pulumi.StringInput{
+				sshTagID,
+			},
 			Match: libnet.FirewallRuleMatch{
 				SrcIpRanges: []string{"35.235.240.0/20"}, // IAP forwarders
 				Layer4Configs: []libnet.FirewallLayer4Config{
@@ -230,6 +269,9 @@ func buildPeeringFirewallRules(cfg *ProjectsConfig) []libnet.FirewallRule {
 			RuleName:      fmt.Sprintf("fw-%s-peering-base-1001-i-a-all-allow-iap-rdp-tcp-3389", cfg.EnvCode),
 			Description:   "Allow RDP via IAP for tagged instances.",
 			EnableLogging: true,
+			TargetSecureTags: []pulumi.StringInput{
+				rdpTagID,
+			},
 			Match: libnet.FirewallRuleMatch{
 				SrcIpRanges: []string{"35.235.240.0/20"}, // IAP forwarders
 				Layer4Configs: []libnet.FirewallLayer4Config{

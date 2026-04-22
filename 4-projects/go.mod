@@ -5,7 +5,7 @@ go 1.26.1
 replace github.com/VitruvianSoftware/pulumi-library => /Users/james/Workspace/gh/infrastructure/vitruvian/pulumi-library
 
 require (
-	github.com/VitruvianSoftware/pulumi-library v0.0.0-20260421061745-09b15eb427f9
+	github.com/VitruvianSoftware/pulumi-library v0.0.0-20260422155656-f927c5bcc67d
 	github.com/pulumi/pulumi-gcp/sdk/v9 v9.20.0
 	github.com/pulumi/pulumi-random/sdk/v4 v4.19.2
 	github.com/pulumi/pulumi/sdk/v3 v3.231.0

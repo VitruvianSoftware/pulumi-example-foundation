@@ -27,12 +27,16 @@ import (
 
 // BUProjects holds outputs from business unit project deployment.
 type BUProjects struct {
-	SVPCProjectID        pulumi.StringOutput
-	FloatingProjectID    pulumi.StringOutput
-	PeeringProjectID     pulumi.StringOutput
+	SVPCProjectID          pulumi.StringOutput
+	FloatingProjectID      pulumi.StringOutput
+	PeeringProjectID       pulumi.StringOutput
 	PeeringNetworkSelfLink pulumi.StringOutput
-	CMEKBucket           *pulumi.StringOutput
-	CMEKKeyring          *pulumi.StringOutput
+	PeeringSubnetSelfLink  pulumi.StringOutput
+	IAPFirewallTags        pulumi.MapOutput
+	CMEKBucket             *pulumi.StringOutput
+	CMEKKeyring            *pulumi.StringOutput
+	ConfSpaceProjectID     *pulumi.StringOutput
+	ConfSpaceWorkloadSA    *pulumi.StringOutput
 }
 
 // budgetConfig returns the standard budget configuration used for every
@@ -50,7 +54,7 @@ func budgetConfig(cfg *ProjectsConfig) *project.BudgetConfig {
 //   - SVPC-attached: connected to the Shared VPC host project w/ VPC-SC
 //   - Floating: standalone project, not attached to any VPC
 //   - Peering: project with its own VPC peered to the host network
-func deployBusinessUnitProjects(ctx *pulumi.Context, cfg *ProjectsConfig, folderID, networkProjectID, perimeterName pulumi.StringOutput) (*BUProjects, error) {
+func deployBusinessUnitProjects(ctx *pulumi.Context, cfg *ProjectsConfig, folderID, networkProjectID, perimeterName, kmsProjectID pulumi.StringOutput) (*BUProjects, error) {
 	result := &BUProjects{}
 
 	// ========================================================================
@@ -154,18 +158,20 @@ func deployBusinessUnitProjects(ctx *pulumi.Context, cfg *ProjectsConfig, folder
 
 	// Deploy peering network infrastructure (VPC, subnet, DNS, peering, firewall)
 	if cfg.PeeringEnabled {
-		peeringNet, err := deployPeeringNetwork(ctx, cfg, peeringProject, networkProjectID)
+		peeringResult, err := deployPeeringNetwork(ctx, cfg, peeringProject, networkProjectID)
 		if err != nil {
 			return nil, err
 		}
-		result.PeeringNetworkSelfLink = peeringNet
+		result.PeeringNetworkSelfLink = peeringResult.NetworkSelfLink
+		result.PeeringSubnetSelfLink = peeringResult.SubnetSelfLink
+		result.IAPFirewallTags = peeringResult.IAPFirewallTags
 	}
 
 	// ========================================================================
 	// 4. CMEK Storage — KMS keyring + encrypted GCS bucket on SVPC project
 	// ========================================================================
 	if cfg.CMEKEnabled {
-		cmekResult, err := deployCMEKStorage(ctx, cfg, svpcProject)
+		cmekResult, err := deployCMEKStorage(ctx, cfg, svpcProject, kmsProjectID)
 		if err != nil {
 			return nil, err
 		}

@@ -11,10 +11,11 @@ The purpose of this step is to set up the folder structure, projects, and infras
 For each business unit, this stage creates:
 
 - A **business unit subfolder** under each environment folder (e.g., `fldr-development-bu1`)
-- **Three project types** per business unit:
+- **Four project types** per business unit:
   - **SVPC-attached** (`prj-{env}-{bu}-sample-svpc`) — Connected as a service project to the Shared VPC host, with VPC-SC perimeter attachment
   - **Floating** (`prj-{env}-{bu}-sample-floating`) — Standalone project not attached to any VPC
   - **Peering** (`prj-{env}-{bu}-sample-peering`) — Project with its own VPC, subnet, DNS policy, and bi-directional peering to the Shared VPC host, with a full firewall policy including IAP secure tags
+  - **Confidential Space** (`prj-{env}-{bu}-conf-space`) — (Optional) Project for Confidential Computing workloads with a dedicated workload service account and IAM bindings, attached to Shared VPC and VPC-SC perimeter
 - An **infrastructure pipeline project** (`prj-c-{bu}-infra-pipeline`) under the common folder with Cloud Build APIs
 - **CMEK storage** — KMS keyring, crypto key, and CMEK-encrypted GCS bucket on the SVPC project
 - **Budget alerts** on every project with configurable thresholds
@@ -28,17 +29,20 @@ example-organization/
     └── fldr-development-bu1
         ├── prj-d-bu1-sample-floating
         ├── prj-d-bu1-sample-svpc      (+ CMEK bucket, VPC-SC)
-        └── prj-d-bu1-sample-peering   (+ VPC, subnet, DNS, peering, firewall)
+        ├── prj-d-bu1-sample-peering   (+ VPC, subnet, DNS, peering, firewall)
+        └── prj-d-bu1-conf-space       (optional, Confidential Space)
 └── fldr-nonproduction
     └── fldr-nonproduction-bu1
         ├── prj-n-bu1-sample-floating
         ├── prj-n-bu1-sample-svpc
-        └── prj-n-bu1-sample-peering
+        ├── prj-n-bu1-sample-peering
+        └── prj-n-bu1-conf-space
 └── fldr-production
     └── fldr-production-bu1
         ├── prj-p-bu1-sample-floating
         ├── prj-p-bu1-sample-svpc
-        └── prj-p-bu1-sample-peering
+        ├── prj-p-bu1-sample-peering
+        └── prj-p-bu1-conf-space
 └── fldr-common
     └── prj-c-bu1-infra-pipeline
 ```
@@ -156,6 +160,7 @@ Same process as above — navigate, initialize, configure, and deploy.
 | `firewall_enable_logging` | Enable logging on firewall rules | | `true` |
 | `windows_activation_enabled` | Enable Windows KMS activation egress rule | | `false` |
 | `optional_fw_rules_enabled` | Enable load balancer health check firewall rules | | `false` |
+| `confidential_space_enabled` | Deploy Confidential Space project with workload SA | | `false` |
 | `cmek_enabled` | Create KMS keyring + CMEK-encrypted GCS bucket | | `true` |
 | `location_kms` | KMS keyring location | | Same as `subnet_region` |
 | `location_gcs` | GCS bucket location | | `"US"` |
@@ -176,16 +181,21 @@ Same process as above — navigate, initialize, configure, and deploy.
 | `floating_project_id` | Floating project ID |
 | `peering_project_id` | Peering project ID |
 | `peering_network` | Peering VPC network self-link |
+| `peering_subnetwork_self_link` | Peering subnet self-link (used by 5-app-infra for instance placement) |
+| `iap_firewall_tags` | Map of IAP secure tag values for SSH/RDP (used by 5-app-infra for VM tagging) |
 | `infra_pipeline_project_id` | Infrastructure pipeline project ID |
 | `network_project_id` | Network project ID (passed through from Stage 1) |
 | `cmek_bucket` | CMEK-encrypted GCS bucket name |
 | `cmek_keyring` | KMS keyring name |
+| `confidential_space_project_id` | Confidential Space project ID (when enabled) |
+| `confidential_space_workload_sa` | Confidential Space workload service account email (when enabled) |
 
 ## File Structure
 
 | File | Description |
 |------|-------------|
 | `main.go` | Configuration loading, folder creation, orchestration, project labels helper |
-| `business_unit.go` | Creates three project types (SVPC, floating, peering) with labels, budget, VPC-SC attachment; delegates to peering and CMEK modules |
+| `business_unit.go` | Creates four project types (SVPC, floating, peering, confidential space) with labels, budget, VPC-SC attachment; delegates to peering and CMEK modules |
 | `peering.go` | Full peering network: VPC, subnet, DNS policy, bi-directional peering, firewall policy with IAP secure tags |
 | `cmek.go` | KMS keyring, crypto key, GCS service account IAM, CMEK-encrypted GCS bucket |
+| `confidential_space.go` | Confidential Space project with workload SA, IAM bindings, SVPC + VPC-SC attachment |
