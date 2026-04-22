@@ -67,7 +67,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: VitruvianSoftware/pulumi-library
-          ref: feat/monorepo-restructure
           path: _pulumi-library
 
       - name: Set up Go
