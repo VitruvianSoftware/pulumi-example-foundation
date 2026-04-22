@@ -243,6 +243,8 @@ func getEnvProjectBudget(cfg *EnvConfig, projectType string) *PerProjectBudget {
 		return nil
 	}
 	switch projectType {
+	case "shared_network":
+		return &cfg.ProjectBudget.SharedNetwork
 	case "kms":
 		return &cfg.ProjectBudget.KMS
 	case "secret":
