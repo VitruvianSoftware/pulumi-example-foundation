@@ -81,7 +81,7 @@ jobs:
       - name: Fix replace directive
         working-directory: ${{ matrix.stage }}
         run: |
-          go mod edit -replace github.com/VitruvianSoftware/pulumi-library=${{ github.workspace }}/_pulumi-library
+          go mod edit -replace github.com/VitruvianSoftware/pulumi-library/go=${{ github.workspace }}/_pulumi-library/go
 
       - name: Tidy
         working-directory: ${{ matrix.stage }}

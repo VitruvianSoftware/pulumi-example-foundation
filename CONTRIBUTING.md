@@ -42,7 +42,7 @@ The branching model varies by stage:
 ### Shared Library
 
 Reusable components live in the separate
-[pulumi-library](https://github.com/VitruvianSoftware/pulumi-library)
+[pulumi-library](https://github.com/VitruvianSoftware/pulumi-library/go)
 repository. If your change involves a new reusable pattern, consider whether
 it belongs in the library rather than in this foundation repo.
 

@@ -19,9 +19,9 @@ package main
 import (
 	"fmt"
 
-	"github.com/VitruvianSoftware/pulumi-library/pkg/bootstrap"
-	"github.com/VitruvianSoftware/pulumi-library/pkg/project"
-	libstorage "github.com/VitruvianSoftware/pulumi-library/pkg/storage"
+	"github.com/VitruvianSoftware/pulumi-library/go/pkg/bootstrap"
+	"github.com/VitruvianSoftware/pulumi-library/go/pkg/project"
+	libstorage "github.com/VitruvianSoftware/pulumi-library/go/pkg/storage"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/storage"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )

@@ -136,7 +136,7 @@ The deployment pipeline (`build/pulumi-ci.yml`) uses a trunk-based development m
 
 ## Using the Shared Library
 
-All stages use the [Vitruvian Software Pulumi Library](https://github.com/VitruvianSoftware/pulumi-library) for reusable components:
+All stages use the [Vitruvian Software Pulumi Library](https://github.com/VitruvianSoftware/pulumi-library/go) for reusable components:
 - `pkg/project` — Project factory with API activation
 - `pkg/iam` — Multi-scope IAM member bindings
 - `pkg/policy` — Organization policy enforcement

@@ -83,6 +83,6 @@ READMEs in the TypeScript foundation.
 
 ## Related
 
-- [Pulumi Library](https://github.com/VitruvianSoftware/pulumi-library) — Shared component library (13 Go packages)
+- [Pulumi Library](https://github.com/VitruvianSoftware/pulumi-library/go) — Shared component library (13 Go packages)
 - [TypeScript Foundation](https://github.com/VitruvianSoftware/pulumi_ts-example-foundation) — TS equivalent with 21 modules
 - [Upstream Terraform](https://github.com/terraform-google-modules/terraform-example-foundation) — Reference architecture

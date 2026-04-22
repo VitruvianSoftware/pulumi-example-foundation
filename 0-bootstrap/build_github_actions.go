@@ -20,7 +20,7 @@ import (
 	"fmt"
 
 	ghactions "github.com/pulumi/pulumi-github/sdk/v6/go/github"
-	libcicd "github.com/VitruvianSoftware/pulumi-library/pkg/cicd"
+	libcicd "github.com/VitruvianSoftware/pulumi-library/go/pkg/cicd"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/serviceaccount"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )
