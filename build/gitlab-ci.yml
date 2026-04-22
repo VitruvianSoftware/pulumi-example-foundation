@@ -1,0 +1,45 @@
+# GitLab CI/CD Pipeline Templates for Pulumi Go Foundation
+#
+# Copy this file to .gitlab-ci.yml in your foundation repo.
+# Configure the following CI/CD variables in your GitLab project settings:
+#
+# Required Variables:
+#   PULUMI_ACCESS_TOKEN    — Pulumi Cloud access token
+#   GCP_WORKLOAD_IDENTITY_PROVIDER — WIF provider resource name
+#   GCP_SERVICE_ACCOUNT    — Stage-specific service account email
+#
+# The pipeline maps branch names to Pulumi stack names:
+#   development    → pulumi up (development stack)
+#   nonproduction  → pulumi up (nonproduction stack)
+#   production     → pulumi up (production stack)
+
+stages:
+  - preview
+  - deploy
+
+.pulumi_base:
+  image: golang:1.21
+  before_script:
+    - curl -fsSL https://get.pulumi.com | sh
+    - export PATH=$HOME/.pulumi/bin:$PATH
+    - go mod download
+
+preview:
+  extends: .pulumi_base
+  stage: preview
+  script:
+    - pulumi stack select ${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}
+    - pulumi preview --diff
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: always
+
+deploy:
+  extends: .pulumi_base
+  stage: deploy
+  script:
+    - pulumi stack select ${CI_COMMIT_BRANCH}
+    - pulumi up --yes
+  rules:
+    - if: $CI_COMMIT_BRANCH =~ /^(development|nonproduction|production)$/
+      when: on_success

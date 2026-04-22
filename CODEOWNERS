@@ -1,1 +1,19 @@
-* @VitruvianSoftware/platform
+# Default owners for everything
+* @VitruvianSoftware/platform-team
+
+# Foundation stages
+/0-bootstrap/ @VitruvianSoftware/platform-team
+/1-org/        @VitruvianSoftware/platform-team
+/2-environments/ @VitruvianSoftware/platform-team
+/3-networks-*/   @VitruvianSoftware/platform-team
+/4-projects/   @VitruvianSoftware/platform-team
+/5-app-infra/  @VitruvianSoftware/platform-team
+
+# CI/CD and policies
+/build/         @VitruvianSoftware/platform-team
+/.github/       @VitruvianSoftware/platform-team
+/policy-library/ @VitruvianSoftware/platform-team
+
+# Documentation
+/docs/          @VitruvianSoftware/platform-team
+*.md            @VitruvianSoftware/platform-team
