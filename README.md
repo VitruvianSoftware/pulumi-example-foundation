@@ -1,4 +1,4 @@
-# Vitruvian Software Pulumi Foundation
+# Vitruvian Software Pulumi Foundation (Golang)
 
 This repository provides a production-ready implementation of the [Google Cloud Enterprise Foundations Blueprint](https://cloud.google.com/architecture/security-foundations), built using **Pulumi** and **Go**.
 
@@ -11,7 +11,7 @@ This repo contains several distinct Pulumi projects, each within their own direc
 ### [0. Bootstrap](./0-bootstrap/)
 
 Bootstraps the GCP organization by creating:
-- **`prj-b-seed`** — Terraform/Pulumi state storage with KMS-encrypted bucket, and the service accounts used by the pipeline
+- **`prj-b-seed`** — Pulumi state storage with KMS-encrypted bucket, and the service accounts used by the pipeline
 - **`prj-b-cicd`** — CI/CD pipeline infrastructure (Artifact Registry, Cloud Build, Workload Identity)
 - **Granular Service Accounts** — One per stage (`bootstrap`, `org`, `env`, `net`, `proj`) with least-privilege IAM at org, folder, project, and billing scopes
 
