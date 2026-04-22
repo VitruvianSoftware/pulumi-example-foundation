@@ -20,31 +20,38 @@ import (
 	"fmt"
 
 	"github.com/VitruvianSoftware/pulumi-library/pkg/project"
+	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/accesscontextmanager"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/compute"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )
 
 // BUProjects holds outputs from business unit project deployment.
 type BUProjects struct {
-	SVPCProjectID     pulumi.StringOutput
-	FloatingProjectID pulumi.StringOutput
-	PeeringProjectID  pulumi.StringOutput
+	SVPCProjectID        pulumi.StringOutput
+	FloatingProjectID    pulumi.StringOutput
+	PeeringProjectID     pulumi.StringOutput
+	PeeringNetworkSelfLink pulumi.StringOutput
+	CMEKBucket           *pulumi.StringOutput
+	CMEKKeyring          *pulumi.StringOutput
+}
+
+// budgetConfig returns the standard budget configuration used for every
+// project, matching the upstream TF project_budget variable.
+func budgetConfig(cfg *ProjectsConfig) *project.BudgetConfig {
+	return &project.BudgetConfig{
+		Amount:             cfg.BudgetAmount,
+		AlertSpentPercents: cfg.BudgetAlertPercents,
+		AlertSpendBasis:    cfg.BudgetSpendBasis,
+	}
 }
 
 // deployBusinessUnitProjects creates three project types per BU/env, matching
 // the Terraform foundation's project factory pattern:
-//   - SVPC-attached: connected to the Shared VPC host project
+//   - SVPC-attached: connected to the Shared VPC host project w/ VPC-SC
 //   - Floating: standalone project, not attached to any VPC
-//   - Peering: project that would peer with the host VPC
-func deployBusinessUnitProjects(ctx *pulumi.Context, cfg *ProjectsConfig, folderID, networkProjectID pulumi.StringOutput) (*BUProjects, error) {
-	standardAPIs := []string{
-		"compute.googleapis.com",
-		"container.googleapis.com",
-		"run.googleapis.com",
-		"artifactregistry.googleapis.com",
-		"billingbudgets.googleapis.com",
-		"logging.googleapis.com",
-	}
+//   - Peering: project with its own VPC peered to the host network
+func deployBusinessUnitProjects(ctx *pulumi.Context, cfg *ProjectsConfig, folderID, networkProjectID, perimeterName pulumi.StringOutput) (*BUProjects, error) {
+	result := &BUProjects{}
 
 	// ========================================================================
 	// 1. SVPC-attached Project
@@ -57,7 +64,17 @@ func deployBusinessUnitProjects(ctx *pulumi.Context, cfg *ProjectsConfig, folder
 		FolderID:        folderID,
 		BillingAccount:  pulumi.String(cfg.BillingAccount),
 		RandomProjectID: cfg.RandomSuffix,
-		ActivateApis:    standardAPIs,
+		Labels:          projectLabels(cfg, "sample-application", "svpc"),
+		Budget:          budgetConfig(cfg),
+		ActivateApis: []string{
+			"compute.googleapis.com",
+			"container.googleapis.com",
+			"run.googleapis.com",
+			"artifactregistry.googleapis.com",
+			"billingbudgets.googleapis.com",
+			"logging.googleapis.com",
+			"accesscontextmanager.googleapis.com",
+		},
 	})
 	if err != nil {
 		return nil, err
@@ -71,6 +88,22 @@ func deployBusinessUnitProjects(ctx *pulumi.Context, cfg *ProjectsConfig, folder
 		return nil, err
 	}
 
+	// VPC-SC Perimeter attachment — attach the SVPC project to the perimeter
+	// matching upstream's vpc_service_control_attach_enabled behavior.
+	if cfg.EnforceVpcSc {
+		_, err := accesscontextmanager.NewServicePerimeterResource(ctx, "svpc-vpcsc-attach", &accesscontextmanager.ServicePerimeterResourceArgs{
+			PerimeterName: perimeterName,
+			Resource: svpcProject.Project.Number.ApplyT(func(n string) string {
+				return fmt.Sprintf("projects/%s", n)
+			}).(pulumi.StringOutput),
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	result.SVPCProjectID = svpcProject.Project.ProjectId
+
 	// ========================================================================
 	// 2. Floating Project (not attached to any VPC)
 	// ========================================================================
@@ -80,14 +113,24 @@ func deployBusinessUnitProjects(ctx *pulumi.Context, cfg *ProjectsConfig, folder
 		FolderID:        folderID,
 		BillingAccount:  pulumi.String(cfg.BillingAccount),
 		RandomProjectID: cfg.RandomSuffix,
-		ActivateApis:    standardAPIs,
+		Labels:          projectLabels(cfg, "sample-application", "none"),
+		Budget:          budgetConfig(cfg),
+		ActivateApis: []string{
+			"compute.googleapis.com",
+			"container.googleapis.com",
+			"run.googleapis.com",
+			"artifactregistry.googleapis.com",
+			"billingbudgets.googleapis.com",
+			"logging.googleapis.com",
+		},
 	})
 	if err != nil {
 		return nil, err
 	}
+	result.FloatingProjectID = floatingProject.Project.ProjectId
 
 	// ========================================================================
-	// 3. Peering Project
+	// 3. Peering Project — full VPC, subnet, DNS, peering, firewall
 	// ========================================================================
 	peeringProject, err := project.NewProject(ctx, "bu-peering-project", &project.ProjectArgs{
 		ProjectID:       pulumi.String(fmt.Sprintf("%s-%s-%s-sample-peering", cfg.ProjectPrefix, cfg.EnvCode, cfg.BusinessCode)),
@@ -95,17 +138,42 @@ func deployBusinessUnitProjects(ctx *pulumi.Context, cfg *ProjectsConfig, folder
 		FolderID:        folderID,
 		BillingAccount:  pulumi.String(cfg.BillingAccount),
 		RandomProjectID: cfg.RandomSuffix,
-		ActivateApis:    standardAPIs,
+		Labels:          projectLabels(cfg, "sample-peering", "none"),
+		Budget:          budgetConfig(cfg),
+		ActivateApis: []string{
+			"compute.googleapis.com",
+			"dns.googleapis.com",
+			"billingbudgets.googleapis.com",
+			"logging.googleapis.com",
+		},
 	})
 	if err != nil {
 		return nil, err
 	}
+	result.PeeringProjectID = peeringProject.Project.ProjectId
 
-	return &BUProjects{
-		SVPCProjectID:     svpcProject.Project.ProjectId,
-		FloatingProjectID: floatingProject.Project.ProjectId,
-		PeeringProjectID:  peeringProject.Project.ProjectId,
-	}, nil
+	// Deploy peering network infrastructure (VPC, subnet, DNS, peering, firewall)
+	if cfg.PeeringEnabled {
+		peeringNet, err := deployPeeringNetwork(ctx, cfg, peeringProject, networkProjectID)
+		if err != nil {
+			return nil, err
+		}
+		result.PeeringNetworkSelfLink = peeringNet
+	}
+
+	// ========================================================================
+	// 4. CMEK Storage — KMS keyring + encrypted GCS bucket on SVPC project
+	// ========================================================================
+	if cfg.CMEKEnabled {
+		cmekResult, err := deployCMEKStorage(ctx, cfg, svpcProject)
+		if err != nil {
+			return nil, err
+		}
+		result.CMEKBucket = &cmekResult.BucketName
+		result.CMEKKeyring = &cmekResult.KeyringName
+	}
+
+	return result, nil
 }
 
 // deployInfraPipelineProject creates the infrastructure pipeline project under
@@ -118,12 +186,17 @@ func deployInfraPipelineProject(ctx *pulumi.Context, cfg *ProjectsConfig, common
 		FolderID:        commonFolderID,
 		BillingAccount:  pulumi.String(cfg.BillingAccount),
 		RandomProjectID: cfg.RandomSuffix,
+		Labels:          projectLabels(cfg, "app-infra-pipelines", "none"),
+		Budget:          budgetConfig(cfg),
 		ActivateApis: []string{
 			"cloudbuild.googleapis.com",
-			"artifactregistry.googleapis.com",
+			"sourcerepo.googleapis.com",
+			"cloudkms.googleapis.com",
 			"iam.googleapis.com",
+			"artifactregistry.googleapis.com",
 			"cloudresourcemanager.googleapis.com",
 			"billingbudgets.googleapis.com",
+			"confidentialcomputing.googleapis.com",
 		},
 	})
 	if err != nil {

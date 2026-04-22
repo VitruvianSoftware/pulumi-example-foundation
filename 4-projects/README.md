@@ -12,10 +12,13 @@ For each business unit, this stage creates:
 
 - A **business unit subfolder** under each environment folder (e.g., `fldr-development-bu1`)
 - **Three project types** per business unit:
-  - **SVPC-attached** (`prj-{env}-{bu}-sample-svpc`) — Connected as a service project to the Shared VPC host
+  - **SVPC-attached** (`prj-{env}-{bu}-sample-svpc`) — Connected as a service project to the Shared VPC host, with VPC-SC perimeter attachment
   - **Floating** (`prj-{env}-{bu}-sample-floating`) — Standalone project not attached to any VPC
-  - **Peering** (`prj-{env}-{bu}-sample-peering`) — Project with VPC peering to the Shared VPC
-- An **infrastructure pipeline project** (`prj-c-{bu}-infra-pipeline`) under the common folder
+  - **Peering** (`prj-{env}-{bu}-sample-peering`) — Project with its own VPC, subnet, DNS policy, and bi-directional peering to the Shared VPC host, with a full firewall policy including IAP secure tags
+- An **infrastructure pipeline project** (`prj-c-{bu}-infra-pipeline`) under the common folder with Cloud Build APIs
+- **CMEK storage** — KMS keyring, crypto key, and CMEK-encrypted GCS bucket on the SVPC project
+- **Budget alerts** on every project with configurable thresholds
+- **Project labels** matching the upstream foundation's metadata convention (8 labels per project)
 
 Running this code as-is should generate a structure as shown below:
 
@@ -24,8 +27,8 @@ example-organization/
 └── fldr-development
     └── fldr-development-bu1
         ├── prj-d-bu1-sample-floating
-        ├── prj-d-bu1-sample-svpc
-        └── prj-d-bu1-sample-peering
+        ├── prj-d-bu1-sample-svpc      (+ CMEK bucket, VPC-SC)
+        └── prj-d-bu1-sample-peering   (+ VPC, subnet, DNS, peering, firewall)
 └── fldr-nonproduction
     └── fldr-nonproduction-bu1
         ├── prj-n-bu1-sample-floating
@@ -73,11 +76,34 @@ See [troubleshooting](../docs/TROUBLESHOOTING.md) if you run into issues during 
    pulumi config set org_stack_name "organization/vitruvian/1-org/production"
    ```
 
-1. (Optional) Override prefixes:
+1. (Optional) Override prefixes and feature toggles:
 
    ```bash
+   # Prefixes
    pulumi config set project_prefix "prj"     # default: prj
    pulumi config set folder_prefix "fldr"      # default: fldr
+
+   # Budget
+   pulumi config set budget_amount 1000         # default: 1000
+   pulumi config set budget_spend_basis "FORECASTED_SPEND"  # default
+
+   # VPC-SC
+   pulumi config set enforce_vpcsc true          # default: true
+
+   # Peering network
+   pulumi config set peering_enabled true        # default: true
+   pulumi config set peering_iap_fw_rules_enabled true  # default: true
+   pulumi config set subnet_region "us-central1"
+   pulumi config set subnet_ip_range "10.3.64.0/21"
+
+   # CMEK storage
+   pulumi config set cmek_enabled true           # default: true
+   pulumi config set keyring_name "bu1-sample-keyring"
+   pulumi config set key_rotation_period "7776000s"
+
+   # Metadata (applied as project labels)
+   pulumi config set primary_contact "example@example.com"
+   pulumi config set billing_code "1234"
    ```
 
 1. Preview and deploy:
@@ -120,6 +146,26 @@ Same process as above — navigate, initialize, configure, and deploy.
 | `org_stack_name` | Fully qualified Pulumi stack name of the 1-org stage | ✅ | — |
 | `project_prefix` | Project name prefix | | `"prj"` |
 | `folder_prefix` | Folder name prefix | | `"fldr"` |
+| `budget_amount` | Budget amount per project (USD) | | `1000` |
+| `budget_spend_basis` | Budget threshold basis: `CURRENT_SPEND` or `FORECASTED_SPEND` | | `"FORECASTED_SPEND"` |
+| `enforce_vpcsc` | Attach SVPC project to VPC-SC perimeter | | `true` |
+| `peering_enabled` | Deploy peering VPC infrastructure | | `true` |
+| `peering_iap_fw_rules_enabled` | Create IAP SSH/RDP firewall rules + secure tags | | `true` |
+| `subnet_region` | Region for the peering subnet | | `"us-central1"` |
+| `subnet_ip_range` | IP CIDR range for the peering subnet | | `"10.3.64.0/21"` |
+| `firewall_enable_logging` | Enable logging on firewall rules | | `true` |
+| `windows_activation_enabled` | Enable Windows KMS activation egress rule | | `false` |
+| `optional_fw_rules_enabled` | Enable load balancer health check firewall rules | | `false` |
+| `cmek_enabled` | Create KMS keyring + CMEK-encrypted GCS bucket | | `true` |
+| `location_kms` | KMS keyring location | | Same as `subnet_region` |
+| `location_gcs` | GCS bucket location | | `"US"` |
+| `keyring_name` | KMS keyring name | | `"{bu}-sample-keyring"` |
+| `key_name` | KMS crypto key name | | `"crypto-key-example"` |
+| `key_rotation_period` | Crypto key rotation period | | `"7776000s"` |
+| `primary_contact` | Primary contact email (used in project labels) | | `"example@example.com"` |
+| `secondary_contact` | Secondary contact email (used in project labels) | | `"example2@example.com"` |
+| `billing_code` | Billing code for project labels | | `"1234"` |
+| `folder_deletion_protection` | Prevent accidental folder deletion | | `true` |
 
 ## Outputs
 
@@ -129,12 +175,17 @@ Same process as above — navigate, initialize, configure, and deploy.
 | `svpc_project_id` | SVPC-attached project ID |
 | `floating_project_id` | Floating project ID |
 | `peering_project_id` | Peering project ID |
+| `peering_network` | Peering VPC network self-link |
 | `infra_pipeline_project_id` | Infrastructure pipeline project ID |
 | `network_project_id` | Network project ID (passed through from Stage 1) |
+| `cmek_bucket` | CMEK-encrypted GCS bucket name |
+| `cmek_keyring` | KMS keyring name |
 
 ## File Structure
 
 | File | Description |
 |------|-------------|
-| `main.go` | Orchestrates project creation: resolves folder/network IDs via Stack References, creates BU folder, deploys projects and infra pipeline |
-| `business_unit.go` | Creates the three project types (SVPC, floating, peering) with appropriate APIs and Shared VPC service project attachment |
+| `main.go` | Configuration loading, folder creation, orchestration, project labels helper |
+| `business_unit.go` | Creates three project types (SVPC, floating, peering) with labels, budget, VPC-SC attachment; delegates to peering and CMEK modules |
+| `peering.go` | Full peering network: VPC, subnet, DNS policy, bi-directional peering, firewall policy with IAP secure tags |
+| `cmek.go` | KMS keyring, crypto key, GCS service account IAM, CMEK-encrypted GCS bucket |
