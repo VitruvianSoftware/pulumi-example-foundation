@@ -88,6 +88,20 @@ Same process as above — navigate, initialize, configure, and deploy.
 | `region` | Region for the Compute Instances | | `"us-central1"` |
 | `confidential_image_digest` | SHA256 digest of the Docker image to be used for running the workload in Confidential Space | | — |
 
+## Outputs
+
+| Name | Description |
+|------|-------------|
+| `project_id` | Application project ID |
+| `region` | Deployment region |
+| `instances_self_links` | Self-links of SVPC-attached compute instances |
+| `peering_instances_self_links` | Self-links of peering VPC compute instances |
+| `confidential_space_project_id` | Confidential Space project ID (when enabled) |
+| `confidential_space_project_number` | Confidential Space project number (when enabled) |
+| `workload_identity_pool_id` | Workload Identity Pool for Confidential Space attestation |
+| `workload_pool_provider_id` | Workload Identity Pool Provider ID |
+| `confidential_instances_self_links` | Self-links of Confidential Space instances |
+
 ## File Structure
 
 | File | Description |

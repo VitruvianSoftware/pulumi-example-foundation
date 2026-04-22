@@ -1,0 +1,14 @@
+# Pulumi Configuration for 4-projects (production stack)
+config:
+  # Required
+  foundation:env: "production"
+  foundation:business_code: "bu1"
+  foundation:billing_account: "XXXXXX-XXXXXX-XXXXXX"
+  foundation:org_stack_name: "organization/vitruvian/1-org/production"
+
+  # Optional
+  # foundation:project_prefix: "prj"
+  # foundation:folder_prefix: "fldr"
+  # foundation:budget_amount: "1000"
+  # foundation:peering_enabled: "true"
+  # foundation:cmek_enabled: "true"

@@ -93,6 +93,15 @@ When deploying the hub-and-spoke architecture, you may encounter a `CONCURRENT_O
 | `region1` | Primary region | | `"us-central1"` |
 | `region2` | Secondary region | | `"us-west1"` |
 
+## Outputs
+
+| Name | Description |
+|------|-------------|
+| `hierarchical_fw` | Hierarchical firewall policy ID |
+| `hub_vpc_id` | Hub VPC network resource ID |
+| `spoke_vpc_id` | Spoke VPC network resource ID |
+| `service_perimeter_name` | VPC Service Controls perimeter name (when enabled) |
+
 ## File Structure
 
 | File | Description |

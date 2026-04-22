@@ -1,0 +1,15 @@
+# Pulumi Configuration for 1-org (production stack)
+config:
+  # Required
+  foundation:org_id: "YOUR_ORG_ID"
+  foundation:billing_account: "XXXXXX-XXXXXX-XXXXXX"
+  foundation:bootstrap_stack_name: "organization/vitruvian/0-bootstrap/production"
+  foundation:domains_to_allow: "example.com"
+
+  # Optional
+  # foundation:project_prefix: "prj"
+  # foundation:folder_prefix: "fldr"
+  # foundation:default_region: "us-central1"
+  # foundation:scc_notification_filter: "state=\"ACTIVE\""
+  # foundation:create_access_context_manager_policy: "true"
+  # foundation:parent_folder: ""

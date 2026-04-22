@@ -1,0 +1,10 @@
+# Pulumi Configuration for 3-networks-svpc (nonproduction stack)
+config:
+  # Required
+  foundation:env: "nonproduction"
+  foundation:project_id: "prj-n-svpc"
+  foundation:parent_id: "organizations/YOUR_ORG_ID"
+
+  # Optional
+  # foundation:region1: "us-central1"
+  # foundation:region2: "us-west1"

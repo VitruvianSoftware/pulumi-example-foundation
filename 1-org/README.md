@@ -230,6 +230,36 @@ Consider the following:
 | `create_access_context_manager_policy` | Whether to create an Access Context Manager policy | | `"true"` |
 | `parent_folder` | Deploy under a specific folder instead of org root | | `""` |
 
+## Outputs
+
+| Name | Description |
+|------|-------------|
+| `org_id` | GCP Organization ID |
+| `parent_resource_id` | Parent resource ID (org or folder) |
+| `parent_resource_type` | Parent resource type (`organization` or `folder`) |
+| `common_folder_name` | Common folder display name |
+| `common_folder_id` | Common folder ID |
+| `network_folder_name` | Network folder display name |
+| `network_folder_id` | Network folder ID |
+| `org_audit_logs_project_id` | Centralized audit logs project ID |
+| `org_billing_export_project_id` | Billing export project ID |
+| `scc_notifications_project_id` | SCC notifications project ID |
+| `common_kms_project_id` | Organization-level KMS project ID |
+| `org_secrets_project_id` | Organization-level Secrets project ID |
+| `interconnect_project_id` | Interconnect project ID |
+| `interconnect_project_number` | Interconnect project number |
+| `net_hub_project_id` | Network hub project ID (Hub and Spoke mode only) |
+| `{env}_network_project_id` | Per-environment network project ID |
+| `shared_vpc_projects` | Map of environment to Shared VPC project IDs |
+| `logs_export_storage_bucket_name` | Log export storage bucket name |
+| `logs_export_pubsub_topic` | Log export Pub/Sub topic name |
+| `logs_export_project_logbucket_name` | Log export Cloud Logging bucket name |
+| `logs_export_project_linked_dataset_name` | BigQuery linked dataset name |
+| `scc_notification_name` | SCC notification configuration name |
+| `cai_monitoring_*` | Cloud Asset Inventory monitoring outputs (when enabled) |
+| `tags` | Organization-level environment tags |
+| `domains_to_allow` | Configured allowed domains list |
+
 ## File Structure
 
 | File | Description |
