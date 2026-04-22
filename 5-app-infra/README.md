@@ -44,7 +44,12 @@ See [troubleshooting](../docs/TROUBLESHOOTING.md) if you run into issues during 
    ```bash
    pulumi config set env "development"
    pulumi config set projects_stack_name "VitruvianSoftware/foundation-4-projects/development"
-   pulumi config set network_stack_name "VitruvianSoftware/foundation-3-networks-svpc/development"
+   ```
+
+1. (Optional) Override the bootstrap stack reference (default derives from projects stack name):
+
+   ```bash
+   pulumi config set bootstrap_stack_name "VitruvianSoftware/foundation-0-bootstrap/shared"
    ```
 
 1. (Optional) Override the default region:
@@ -79,7 +84,7 @@ Same process as above — navigate, initialize, configure, and deploy.
 | `env` | Environment name (`development`, `nonproduction`, `production`) | ✅ | — |
 | `business_code` | Business Unit code (e.g. `bu1`) | | `"bu1"` |
 | `projects_stack_name` | Fully qualified Pulumi stack name of the 4-projects stage for this environment | | `VitruvianSoftware/foundation-4-projects/<env>` |
-| `network_stack_name` | Fully qualified Pulumi stack name of the 3-networks-svpc stage for this environment | | `VitruvianSoftware/foundation-3-networks-svpc/<env>` |
+| `bootstrap_stack_name` | Fully qualified Pulumi stack name of the 0-bootstrap stage (shared) | | Derived from `projects_stack_name` |
 | `region` | Region for the Compute Instances | | `"us-central1"` |
 | `confidential_image_digest` | SHA256 digest of the Docker image to be used for running the workload in Confidential Space | | — |
 
@@ -87,6 +92,6 @@ Same process as above — navigate, initialize, configure, and deploy.
 
 | File | Description |
 |------|-------------|
-| `main.go` | Resolves outputs from previous stages and coordinates deployment of instances. |
+| `main.go` | Resolves outputs from previous stages, coordinates deployment of instances, and exports results. |
 | `env_base.go` | Deploys standard Compute Instances with Service Accounts and IAP tag bindings. |
 | `confidential_space.go` | Deploys Confidential Space VMs and Workload Identity components for attestation. |
