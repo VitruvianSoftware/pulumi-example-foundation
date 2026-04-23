@@ -58,6 +58,8 @@ func deploySeedProject(ctx *pulumi.Context, cfg *Config, folderID pulumi.StringO
 		BillingAccount: cfg.BillingAccount,
 		ProjectPrefix:  cfg.ProjectPrefix,
 		DefaultRegion:  cfg.DefaultRegion,
+		DefaultRegionKMS: cfg.DefaultRegionKMS,
+		DefaultRegionGCS: cfg.DefaultRegionGCS,
 		RandomSuffix:   cfg.RandomSuffix,
 		ProjectLabels: pulumi.StringMap{
 			"environment":       pulumi.String("bootstrap"),
@@ -119,7 +121,7 @@ func deploySeedProject(ctx *pulumi.Context, cfg *Config, folderID pulumi.StringO
 	projectsStateBucket, err := libstorage.NewSimpleBucket(ctx, "projects-state-bucket", &libstorage.SimpleBucketArgs{
 		Name:         projectsBucketName,
 		ProjectID:    b.SeedProjectID,
-		Location:     pulumi.String(cfg.DefaultRegion),
+		Location:     pulumi.String(cfg.DefaultRegionGCS),
 		ForceDestroy: pulumi.Bool(cfg.BucketForceDestroy),
 		Versioning:   &enabled,
 		Encryption: &storage.BucketEncryptionArgs{

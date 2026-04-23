@@ -197,7 +197,6 @@ func deployInfraPipelineProject(ctx *pulumi.Context, cfg *ProjectsConfig, common
 		Budget:          budgetConfig(cfg),
 		ActivateApis: []string{
 			"cloudbuild.googleapis.com",
-			"sourcerepo.googleapis.com",
 			"cloudkms.googleapis.com",
 			"iam.googleapis.com",
 			"artifactregistry.googleapis.com",
