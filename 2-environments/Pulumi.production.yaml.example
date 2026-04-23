@@ -1,9 +1,9 @@
 # Pulumi Configuration for 2-environments (production stack)
 config:
   # Required
-  foundation:org_id: "YOUR_ORG_ID"
-  foundation:billing_account: "XXXXXX-XXXXXX-XXXXXX"
-  foundation:org_stack_name: "organization/vitruvian/1-org/production"
+  foundation-2-environments:org_id: "YOUR_ORG_ID"
+  foundation-2-environments:billing_account: "XXXXXX-XXXXXX-XXXXXX"
+  foundation-2-environments:org_stack_name: "organization/vitruvian/1-org/production"
 
   # Optional
-  # foundation:project_prefix: "prj"
+  # foundation-2-environments:project_prefix: "prj"

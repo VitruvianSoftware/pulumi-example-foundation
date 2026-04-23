@@ -40,8 +40,18 @@ if [[ "${1:-}" == "--dry-run" ]]; then
     echo "=== DRY RUN MODE — no resources will be deleted ==="
 fi
 
+# Load .env if it exists
+if [ -f .env ]; then
+  echo "Loading environment variables from .env..."
+  set -a
+  source .env
+  set +a
+fi
+
+ORGANIZATION_ID=${ORGANIZATION_ID:-$E2E_ORG_ID}
+
 # Validate required env vars
-: "${ORGANIZATION_ID:?Environment variable ORGANIZATION_ID is required}"
+: "${ORGANIZATION_ID:?Environment variable ORGANIZATION_ID or E2E_ORG_ID is required}"
 
 echo "=== Cleaning foundation resources from org: ${ORGANIZATION_ID} ==="
 
