@@ -19,6 +19,17 @@ github.com/AzureAD/microsoft-authentication-library-for-go v1.3.3/go.mod h1:wP83
 github.com/BurntSushi/toml v1.6.0/go.mod h1:ukJfTF/6rtPPRCnwkur4qwRxa8vTRFBF0uk2lLoLwho=
 github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.31.0/go.mod h1:P4WPRUkOhJC13W//jWpyfJNDAIpvRbAUIYLX/4jtlE0=
 github.com/MakeNowJust/heredoc v1.0.0/go.mod h1:mG5amYoWBHf8vpLOuehzbGGw0EHxpZZ6lCpQ4fNJ8LE=
+github.com/VitruvianSoftware/pulumi-library/go/pkg/bootstrap v0.2.0/go.mod h1:lW2OCj7Ha2RlBc8OF/B1CUhYyI90F6W+sMUyMZj65bk=
+github.com/VitruvianSoftware/pulumi-library/go/pkg/cicd v0.2.0/go.mod h1:vOAJ7MnRDsOWN4uzX5lMgSFJ3PioKPXjBsP44VfGPnA=
+github.com/VitruvianSoftware/pulumi-library/go/pkg/group v0.2.0/go.mod h1:gFq2yM8G7m3323lvVjwLuNRmIv39zGNh/am3B7fCjZA=
+github.com/VitruvianSoftware/pulumi-library/go/pkg/iam v0.2.0/go.mod h1:KMQRsTWYHsK9rKi+BsOuhQkPWxRsEdBf8yPb9cErp/0=
+github.com/VitruvianSoftware/pulumi-library/go/pkg/logging v0.2.0/go.mod h1:rsPbJwdWYNKzwKVc4oXoESEMzgyQq83LHHO+gopFw3o=
+github.com/VitruvianSoftware/pulumi-library/go/pkg/networking v0.2.0/go.mod h1:cAm3CjuDUHS8s9WZCm4bg3kZMEeb0bDF6/n1LaT09go=
+github.com/VitruvianSoftware/pulumi-library/go/pkg/policy v0.2.0/go.mod h1:vDyCkpYX1U1anIBGEDqLiQGsR7mOB7KA8t3XVnc9S4o=
+github.com/VitruvianSoftware/pulumi-library/go/pkg/project v0.2.0/go.mod h1:XT8PLfQZFvl4odYxpFTQm4SlOnpiNQwKz83oTsakw6s=
+github.com/VitruvianSoftware/pulumi-library/go/pkg/security v0.2.0/go.mod h1:e7IvVkLlkb9MjWetDB2Rg5cm8HTvWKZbNWUKHEQlMY4=
+github.com/VitruvianSoftware/pulumi-library/go/pkg/storage v0.2.0/go.mod h1:gdDkKF0+E1l25vW4OZlud6SIkQ+Z4UDMzogtbU1bCIA=
+github.com/VitruvianSoftware/pulumi-library/go/pkg/vpc_sc v0.2.0/go.mod h1:3Z4zMeK0/bj9q8xoSuzBtdRofuNrLIsgWqVEKbMSD2I=
 github.com/acomagu/bufpipe v1.0.3/go.mod h1:mxdxdup/WdsKVreO5GpW4+M/1CE2sMG4jeGJ2sYmHc4=
 github.com/alecthomas/chroma v0.10.0/go.mod h1:jtJATyUxlIORhUOFNA9NZDWGAQ8wpxQQqNSB4rjA/1s=
 github.com/alecthomas/chroma/v2 v2.13.0/go.mod h1:BUGjjsD+ndS6eX37YgTchSEG+Jg9Jv1GiZs9sqPqztk=

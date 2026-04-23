@@ -1,10 +1,10 @@
 # Pulumi Configuration for 5-app-infra (development stack)
 config:
   # Required
-  foundation:env: "development"
-  foundation:projects_stack_name: "VitruvianSoftware/foundation-4-projects/development"
+  foundation-5-app-infra:env: "development"
+  foundation-5-app-infra:projects_stack_name: "VitruvianSoftware/foundation-4-projects/development"
 
   # Optional
-  # foundation:business_code: "bu1"
-  # foundation:region: "us-central1"
-  # foundation:confidential_image_digest: ""
+  # foundation-5-app-infra:business_code: "bu1"
+  # foundation-5-app-infra:region: "us-central1"
+  # foundation-5-app-infra:confidential_image_digest: ""

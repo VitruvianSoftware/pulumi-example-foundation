@@ -1,10 +1,10 @@
 # Pulumi Configuration for 5-app-infra (nonproduction stack)
 config:
   # Required
-  foundation:env: "nonproduction"
-  foundation:projects_stack_name: "VitruvianSoftware/foundation-4-projects/nonproduction"
+  foundation-5-app-infra:env: "nonproduction"
+  foundation-5-app-infra:projects_stack_name: "VitruvianSoftware/foundation-4-projects/nonproduction"
 
   # Optional
-  # foundation:business_code: "bu1"
-  # foundation:region: "us-central1"
-  # foundation:confidential_image_digest: ""
+  # foundation-5-app-infra:business_code: "bu1"
+  # foundation-5-app-infra:region: "us-central1"
+  # foundation-5-app-infra:confidential_image_digest: ""

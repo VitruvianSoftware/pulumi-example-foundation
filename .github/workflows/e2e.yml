@@ -1,0 +1,192 @@
+# Copyright 2026 Vitruvian Software
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# End-to-End Foundation Test
+#
+# Deploys the complete 6-stage foundation against a sandbox GCP Organization,
+# validates resource creation via GCP APIs, then tears everything down.
+#
+# Trigger modes:
+#   1. Manual (workflow_dispatch): Always runs. Use for ad-hoc validation.
+#   2. Automated (push/PR): Only runs when E2E_ENABLED repository variable
+#      is set to "true". Defaults to skipped to avoid expensive runs.
+#
+# Required secrets:
+#   GCP_WORKLOAD_IDENTITY_PROVIDER — WIF provider resource name
+#   GCP_SERVICE_ACCOUNT            — SA email with org-level permissions
+#   PULUMI_ACCESS_TOKEN            — Pulumi Cloud access token
+#
+# Required variables:
+#   E2E_ORG_ID          — Sandbox organization ID
+#   E2E_BILLING_ACCOUNT — Sandbox billing account ID
+#   E2E_DOMAIN          — Sandbox domain (e.g., sandbox.example.dev)
+#   E2E_ENABLED         — Set to "true" to enable on push/PR (default: false)
+
+name: E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Deployment action"
+        required: true
+        default: "up"
+        type: choice
+        options:
+          - up
+          - destroy
+      stage:
+        description: "Target stage (0-5, or blank for all)"
+        required: false
+        default: ""
+        type: string
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write   # Required for Workload Identity Federation
+
+concurrency:
+  group: 'e2e-${{ github.head_ref || github.ref }}'
+  cancel-in-progress: false  # Never cancel in-flight infra operations
+
+jobs:
+  gate:
+    name: "E2E Gate"
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - name: Check E2E eligibility
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "✅ Manual trigger — E2E will run"
+          elif [ "${{ vars.E2E_ENABLED }}" = "true" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "✅ E2E_ENABLED=true — E2E will run"
+          else
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "⏭️  E2E_ENABLED is not 'true' — skipping E2E"
+          fi
+
+  deploy:
+    name: "Deploy Foundation"
+    needs: gate
+    if: needs.gate.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    env:
+      GOWORK: "off"
+      GONOSUMCHECK: "github.com/VitruvianSoftware/*"
+      GONOSUMDB: "github.com/VitruvianSoftware/*"
+      GOPRIVATE: "github.com/VitruvianSoftware/*"
+      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+      E2E_ORG_ID: ${{ vars.E2E_ORG_ID }}
+      E2E_BILLING_ACCOUNT: ${{ vars.E2E_BILLING_ACCOUNT }}
+      E2E_DOMAIN: ${{ vars.E2E_DOMAIN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 0-bootstrap/go.mod
+
+      - name: Configure Go private modules
+        run: git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Install Pulumi
+        uses: pulumi/actions@v6
+        with:
+          command: version
+
+      - name: Generate E2E configuration
+        run: ./test/setup_e2e.sh
+
+      - name: Deploy foundation
+        run: |
+          ACTION="${{ github.event.inputs.action || 'up' }}"
+          STAGE="${{ github.event.inputs.stage || '' }}"
+
+          ARGS="--action $ACTION"
+          if [ -n "$STAGE" ]; then
+            ARGS="$ARGS --stage $STAGE"
+          fi
+
+          ./helpers/foundation-deployer/deploy.sh $ARGS
+
+  validate:
+    name: "Validate Resources"
+    needs: deploy
+    if: github.event.inputs.action != 'destroy'
+    runs-on: ubuntu-latest
+    env:
+      E2E_ORG_ID: ${{ vars.E2E_ORG_ID }}
+      E2E_BILLING_ACCOUNT: ${{ vars.E2E_BILLING_ACCOUNT }}
+      E2E_DOMAIN: ${{ vars.E2E_DOMAIN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Validate E2E resources
+        run: ./test/validate_e2e.sh
+
+  teardown:
+    name: "Teardown"
+    needs: [deploy, validate]
+    if: always() && needs.gate.outputs.should_run == 'true' && github.event.inputs.action != 'destroy'
+    runs-on: ubuntu-latest
+    env:
+      E2E_ORG_ID: ${{ vars.E2E_ORG_ID }}
+      E2E_BILLING_ACCOUNT: ${{ vars.E2E_BILLING_ACCOUNT }}
+      E2E_DOMAIN: ${{ vars.E2E_DOMAIN }}
+      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Teardown resources
+        run: ./test/clean_org.sh
