@@ -1,0 +1,135 @@
+// Copyright 2026 Vitruvian Software
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// ============================================================================
+// HA VPN — Example
+// ============================================================================
+//
+// This file is an EXAMPLE showing how to provision High Availability VPN
+// tunnels for on-prem connectivity. This mirrors the Terraform foundation's
+// `vpn.tf.example`.
+//
+// To activate:
+// 1. Rename: vpn.go.example → vpn.go
+// 2. Create a VPN pre-shared key secret (see 0-bootstrap/onprem.md)
+// 3. Update the configuration values below for your environment
+// 4. Call deployHaVpn() from main.go
+// 5. Run `pulumi up` in each environment stack
+//
+// ============================================================================
+
+package main
+
+import (
+	"fmt"
+
+	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/compute"
+	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/secretmanager"
+	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
+)
+
+// VpnConfig holds the configuration for HA VPN.
+type VpnConfig struct {
+	ProjectID          pulumi.StringInput
+	EnvSecretProjectID pulumi.StringInput
+	VPCName            string
+	DefaultRegion1     string
+	DefaultRegion2     string
+	Region1Router1Name pulumi.StringInput
+	Region1Router2Name pulumi.StringInput
+	Region2Router1Name pulumi.StringInput
+	Region2Router2Name pulumi.StringInput
+	VpnPskSecretName   string
+	OnPremRouterIP1    string
+	OnPremRouterIP2    string
+	BgpPeerASN         string
+}
+
+// deployHaVpn provisions HA VPN gateways and tunnels for on-prem connectivity.
+func deployHaVpn(ctx *pulumi.Context, name string, cfg *VpnConfig) error {
+	// Retrieve VPN PSK from Secret Manager
+	vpnPsk, err := secretmanager.LookupSecretVersion(ctx, &secretmanager.LookupSecretVersionArgs{
+		Project: pulumi.StringRef(cfg.VpnPskSecretName), // Update to actual project
+		Secret:  cfg.VpnPskSecretName,
+	})
+	if err != nil {
+		return err
+	}
+
+	// HA VPN Gateway — Region 1
+	vpnGw1, err := compute.NewHaVpnGateway(ctx, fmt.Sprintf("%s-gw-r1", name), &compute.HaVpnGatewayArgs{
+		Project: cfg.ProjectID,
+		Region:  pulumi.String(cfg.DefaultRegion1),
+		Name:    pulumi.Sprintf("vpn-%s-r1", cfg.VPCName),
+		Network: pulumi.Sprintf("projects/%s/global/networks/%s", cfg.ProjectID, cfg.VPCName),
+	})
+	if err != nil {
+		return err
+	}
+
+	// HA VPN Gateway — Region 2
+	_, err = compute.NewHaVpnGateway(ctx, fmt.Sprintf("%s-gw-r2", name), &compute.HaVpnGatewayArgs{
+		Project: cfg.ProjectID,
+		Region:  pulumi.String(cfg.DefaultRegion2),
+		Name:    pulumi.Sprintf("vpn-%s-r2", cfg.VPCName),
+		Network: pulumi.Sprintf("projects/%s/global/networks/%s", cfg.ProjectID, cfg.VPCName),
+	})
+	if err != nil {
+		return err
+	}
+
+	// External VPN Gateway (on-prem peer)
+	externalGw, err := compute.NewExternalVpnGateway(ctx, fmt.Sprintf("%s-external-gw", name), &compute.ExternalVpnGatewayArgs{
+		Project:        cfg.ProjectID,
+		Name:           pulumi.Sprintf("ext-vpn-%s", cfg.VPCName),
+		RedundancyType: pulumi.String("TWO_IPS_REDUNDANCY"),
+		Interfaces: compute.ExternalVpnGatewayInterfaceArray{
+			&compute.ExternalVpnGatewayInterfaceArgs{Id: pulumi.Int(0), IpAddress: pulumi.String(cfg.OnPremRouterIP1)},
+			&compute.ExternalVpnGatewayInterfaceArgs{Id: pulumi.Int(1), IpAddress: pulumi.String(cfg.OnPremRouterIP2)},
+		},
+	})
+	if err != nil {
+		return err
+	}
+
+	// Region 1, Tunnel 0
+	_, err = compute.NewVPNTunnel(ctx, fmt.Sprintf("%s-r1-t0", name), &compute.VPNTunnelArgs{
+		Project:                     cfg.ProjectID,
+		Region:                      pulumi.String(cfg.DefaultRegion1),
+		Name:                        pulumi.Sprintf("vpn-%s-r1-t0", cfg.VPCName),
+		VpnGateway:                  vpnGw1.ID(),
+		VpnGatewayInterface:         pulumi.Int(0),
+		PeerExternalGateway:         externalGw.ID(),
+		PeerExternalGatewayInterface: pulumi.Int(0),
+		SharedSecret:                 pulumi.String(vpnPsk.SecretData),
+		Router:                       cfg.Region1Router1Name,
+	})
+	if err != nil {
+		return err
+	}
+
+	// Region 1, Tunnel 1
+	_, err = compute.NewVPNTunnel(ctx, fmt.Sprintf("%s-r1-t1", name), &compute.VPNTunnelArgs{
+		Project:                     cfg.ProjectID,
+		Region:                      pulumi.String(cfg.DefaultRegion1),
+		Name:                        pulumi.Sprintf("vpn-%s-r1-t1", cfg.VPCName),
+		VpnGateway:                  vpnGw1.ID(),
+		VpnGatewayInterface:         pulumi.Int(1),
+		PeerExternalGateway:         externalGw.ID(),
+		PeerExternalGatewayInterface: pulumi.Int(1),
+		SharedSecret:                 pulumi.String(vpnPsk.SecretData),
+		Router:                       cfg.Region1Router2Name,
+	})
+	return err
+}
