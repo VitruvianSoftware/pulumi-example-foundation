@@ -82,10 +82,12 @@ for stage in "${STAGES[@]}"; do
             for stack in $stacks; do
                 echo "  Found stack: $stack"
                 if [ "$DRY_RUN" = false ]; then
+                    echo "  Unprotecting all resources in stack: $stack"
+                    pulumi state unprotect --all -y -s "$stack" 2>/dev/null || true
                     echo "  Destroying stack: $stack"
-                    pulumi stack select "$stack" 2>/dev/null || true
-                    pulumi destroy --yes --skip-preview 2>/dev/null || true
-                    pulumi stack rm "$stack" --yes 2>/dev/null || true
+                    pulumi destroy --yes --skip-preview -s "$stack" 2>/dev/null || true
+                    echo "  Removing stack: $stack"
+                    pulumi stack rm "$stack" --force --yes 2>/dev/null || true
                 else
                     echo "  [DRY RUN] Would destroy stack: $stack"
                 fi
