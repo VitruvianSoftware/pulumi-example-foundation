@@ -123,18 +123,18 @@ done
 echo ""
 echo "--- Checking for foundation folders ---"
 
-FOLDER_PREFIXES=("fldr-bootstrap" "fldr-common" "fldr-development" "fldr-nonproduction" "fldr-production")
+FOLDER_PREFIXES=("fldr-")
 
 for prefix in "${FOLDER_PREFIXES[@]}"; do
-    folders=$(gcloud resource-manager folders list --organization="$ORGANIZATION_ID" \
-        --filter="displayName:${prefix}*" --format="value(name)" 2>/dev/null || true)
-    for folder in $folders; do
-        echo "  Found folder: $folder"
+    folders=$(gcloud alpha resource-manager folders search --query="displayName:${prefix}*" --format="value(name)" 2>/dev/null || true)
+    for folder_name in $folders; do
+        folder_id=${folder_name#folders/}
+        echo "  Found folder: $folder_id"
         if [ "$DRY_RUN" = false ]; then
-            echo "  Deleting folder: $folder"
-            gcloud resource-manager folders delete "$folder" --quiet 2>/dev/null || true
+            echo "  Deleting folder: $folder_id"
+            gcloud resource-manager folders delete "$folder_id" --quiet 2>/dev/null || true
         else
-            echo "  [DRY RUN] Would delete folder: $folder"
+            echo "  [DRY RUN] Would delete folder: $folder_id"
         fi
     done
 done

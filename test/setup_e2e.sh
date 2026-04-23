@@ -53,10 +53,15 @@ if [ -z "$E2E_DOMAIN" ]; then
   exit 1
 fi
 
+E2E_FOLDER_ID=${E2E_FOLDER_ID:-""}
+
 echo "================================================="
 echo " Configuring Foundation for E2E Deployment"
 echo "================================================="
 echo " Organization:  $E2E_ORG_ID"
+if [ -n "$E2E_FOLDER_ID" ]; then
+  echo " Parent Folder: $E2E_FOLDER_ID"
+fi
 echo " Billing ID:    $E2E_BILLING_ACCOUNT"
 echo " Domain:        $E2E_DOMAIN"
 
@@ -88,6 +93,7 @@ find . -type f -name "Pulumi.*.yaml.example" | while read -r example_file; do
       -v audit_data="$AUDIT_DATA" \
       -v pulumi_user="$PULUMI_USER" \
       -v domain="$E2E_DOMAIN" \
+      -v folder_id="$E2E_FOLDER_ID" \
       '{
         gsub(/YOUR_ORG_ID/, org);
         gsub(/XXXXXX-XXXXXX-XXXXXX/, billing);
@@ -99,6 +105,11 @@ find . -type f -name "Pulumi.*.yaml.example" | while read -r example_file; do
         gsub(/audit-data@example.com/, audit_data);
         gsub(/organization\/vitruvian/, pulumi_user);
         gsub(/domains_to_allow: "example.com"/, "domains_to_allow: \"" domain "\"");
+        
+        if (folder_id != "") {
+          gsub(/# [a-zA-Z0-9_-]+:parent_folder: ""/, "0-bootstrap:parent_folder: \"" folder_id "\"");
+        }
+        
         print
       }' "$example_file" > "$target_file"
 done
