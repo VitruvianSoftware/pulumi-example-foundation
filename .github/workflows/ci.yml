@@ -44,10 +44,12 @@ jobs:
     name: "Build: ${{ matrix.stage }}"
     runs-on: ubuntu-latest
     env:
-      # Disable go.work so each stage uses its own go.mod with the
-      # CI-rewritten replace directive instead of the repo's go.work
-      # which references a local path that doesn't exist in CI.
+      # Dependencies now resolve from the Go module proxy via tagged
+      # versions (go/pkg/*/v0.2.0) — no local replace directives needed.
       GOWORK: "off"
+      GONOSUMCHECK: "github.com/VitruvianSoftware/*"
+      GONOSUMDB: "github.com/VitruvianSoftware/*"
+      GOPRIVATE: "github.com/VitruvianSoftware/*"
     strategy:
       fail-fast: false
       matrix:
@@ -63,14 +65,8 @@ jobs:
       - name: Checkout foundation
         uses: actions/checkout@v4
 
-      - name: Checkout pulumi-library
-        uses: actions/checkout@v4
-        with:
-          repository: VitruvianSoftware/pulumi-library
-          path: pulumi-library
-
-      - name: Symlink library
-        run: ln -s $(pwd)/pulumi-library ../pulumi-library
+      - name: Configure Go private modules
+        run: git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
 
       - name: Set up Go
         uses: actions/setup-go@v5
