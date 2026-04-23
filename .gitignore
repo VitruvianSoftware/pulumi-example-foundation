@@ -1,8 +1,8 @@
 # Pulumi
 .pulumi/
-Pulumi.dev.yaml
-Pulumi.prod.yaml
-Pulumi.nonprod.yaml
+Pulumi.*.yaml
+!Pulumi.yaml
+!Pulumi.*.yaml.example
 
 # Go
 bin/

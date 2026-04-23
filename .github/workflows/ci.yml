@@ -89,28 +89,3 @@ jobs:
       - name: Test
         working-directory: ${{ matrix.stage }}
         run: go test ./... -race -count=1
-
-
-  commitlint:
-    name: Commit Lint
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup node
-        uses: actions/setup-node@v4
-        with:
-          node-version: lts/*
-
-      - name: Install commitlint
-        run: |
-          npm install -D @commitlint/cli @commitlint/config-conventional
-          echo "module.exports = { extends: ['@commitlint/config-conventional'], rules: {'subject-case': [0], 'header-max-length': [0]} };" > commitlint.config.js
-
-      - name: Validate PR title
-        env:
-          TITLE: ${{ github.event.pull_request.title }}
-        run: 'echo "$TITLE" | npx commitlint --verbose'

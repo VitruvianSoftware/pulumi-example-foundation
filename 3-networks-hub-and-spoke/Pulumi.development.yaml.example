@@ -1,0 +1,10 @@
+# Pulumi Configuration for 3-networks-hub-and-spoke (development stack)
+config:
+  # Required
+  foundation:env: "development"
+  foundation:project_id: "prj-d-hub-and-spoke"
+  foundation:parent_id: "organizations/YOUR_ORG_ID"
+
+  # Optional
+  # foundation:region1: "us-central1"
+  # foundation:region2: "us-west1"

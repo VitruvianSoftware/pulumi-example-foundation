@@ -1,0 +1,31 @@
+# Pulumi stack configs (contain secrets / environment-specific values)
+.pulumi/
+Pulumi.*.yaml
+!Pulumi.yaml
+!Pulumi.*.yaml.example
+
+# Go
+bin/
+dist/
+*.exe
+*.test
+*.out
+vendor/
+
+# Compiled stage binary
+foundation-*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Credentials
+credentials.json
+.envrc
+.env
