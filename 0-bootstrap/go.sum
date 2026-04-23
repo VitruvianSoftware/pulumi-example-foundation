@@ -9,8 +9,8 @@ github.com/ProtonMail/go-crypto v1.1.6 h1:ZcV+Ropw6Qn0AX9brlQLAUXfqLBc7Bl+f/DmNx
 github.com/ProtonMail/go-crypto v1.1.6/go.mod h1:rA3QumHc/FZ8pAHreoekgiAbzpNsfQAosU5td4SnOrE=
 github.com/VitruvianSoftware/pulumi-library/go v0.0.0-20260423175544-55433459ca63 h1:KYpDlxSn6uS6UH876kobIA7fgd6MtAtqeYI6wIzBQ/g=
 github.com/VitruvianSoftware/pulumi-library/go v0.0.0-20260423175544-55433459ca63/go.mod h1:ky/UwWj4SMMTgFZtE1eEPu0ISOBCnE0E5GtEQ6lnzIM=
-github.com/VitruvianSoftware/pulumi-library/go/pkg/bootstrap v0.2.0 h1:MtJC9ty5qAdhdjrtMSIiCKDK1+v56zlvhihDsngxnhI=
-github.com/VitruvianSoftware/pulumi-library/go/pkg/bootstrap v0.2.0/go.mod h1:lW2OCj7Ha2RlBc8OF/B1CUhYyI90F6W+sMUyMZj65bk=
+github.com/VitruvianSoftware/pulumi-library/go/pkg/bootstrap v0.2.1-0.20260423223700-5d6cb359b7d6 h1:eramrtveB/LVkFCCBH8kDURd6rCTJVBrGz+cJdx3HJ8=
+github.com/VitruvianSoftware/pulumi-library/go/pkg/bootstrap v0.2.1-0.20260423223700-5d6cb359b7d6/go.mod h1:lW2OCj7Ha2RlBc8OF/B1CUhYyI90F6W+sMUyMZj65bk=
 github.com/VitruvianSoftware/pulumi-library/go/pkg/cicd v0.2.0 h1:YJL7oYEeRuUpJV2+cSCMDxOBmSB7aC3Nokjy6UCh2J0=
 github.com/VitruvianSoftware/pulumi-library/go/pkg/cicd v0.2.0/go.mod h1:vOAJ7MnRDsOWN4uzX5lMgSFJ3PioKPXjBsP44VfGPnA=
 github.com/VitruvianSoftware/pulumi-library/go/pkg/group v0.2.0 h1:JpX5l1UK6vFbFhVWyZm1P+LXKUVWnWVCHDA45oClKpc=
