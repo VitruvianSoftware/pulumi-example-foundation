@@ -17,7 +17,7 @@ vendor/
 .env
 
 # Compiled stage binaries
-foundation-*
+/foundation-*
 0-bootstrap/foundation-0-bootstrap
 1-org/foundation-1-org
 2-environments/foundation-2-environments
