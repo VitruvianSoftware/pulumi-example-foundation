@@ -109,6 +109,11 @@ for prefix in "${PROJECT_PREFIXES[@]}"; do
     for project in $projects; do
         echo "  Found project: $project"
         if [ "$DRY_RUN" = false ]; then
+            echo "  Removing liens from project: $project"
+            liens=$(gcloud alpha resource-manager liens list --project="$project" --format="value(name)" 2>/dev/null || true)
+            for lien in $liens; do
+                gcloud alpha resource-manager liens delete "$lien" --project="$project" --quiet 2>/dev/null || true
+            done
             echo "  Deleting project: $project"
             gcloud projects delete "$project" --quiet 2>/dev/null || true
         else
