@@ -2,10 +2,9 @@ module foundation-3-networks-hub-and-spoke
 
 go 1.26.1
 
-replace github.com/VitruvianSoftware/pulumi-library/go => /Users/james/Workspace/gh/infrastructure/vitruvian/pulumi-library/go
-
 require (
-	github.com/VitruvianSoftware/pulumi-library/go v0.0.0-20260421061745-09b15eb427f9
+	github.com/VitruvianSoftware/pulumi-library/go/pkg/networking v0.0.0-00010101000000-000000000000
+	github.com/VitruvianSoftware/pulumi-library/go/pkg/vpc_sc v0.0.0-00010101000000-000000000000
 	github.com/pulumi/pulumi-gcp/sdk/v9 v9.20.0
 	github.com/pulumi/pulumi/sdk/v3 v3.231.0
 	github.com/stretchr/testify v1.11.1
@@ -15,6 +14,7 @@ require (
 	dario.cat/mergo v1.0.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/ProtonMail/go-crypto v1.1.6 // indirect
+	github.com/VitruvianSoftware/pulumi-library/go v0.0.0-20260423010221-19f186d91079 // indirect
 	github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da // indirect
 	github.com/agext/levenshtein v1.2.3 // indirect
 	github.com/apparentlymart/go-textseg/v13 v13.0.0 // indirect
@@ -123,3 +123,29 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	lukechampine.com/frand v1.4.2 // indirect
 )
+
+replace github.com/VitruvianSoftware/pulumi-library/go/pkg/app => ../../pulumi-library/go/pkg/app
+
+replace github.com/VitruvianSoftware/pulumi-library/go/pkg/bootstrap => ../../pulumi-library/go/pkg/bootstrap
+
+replace github.com/VitruvianSoftware/pulumi-library/go/pkg/cicd => ../../pulumi-library/go/pkg/cicd
+
+replace github.com/VitruvianSoftware/pulumi-library/go/pkg/data => ../../pulumi-library/go/pkg/data
+
+replace github.com/VitruvianSoftware/pulumi-library/go/pkg/group => ../../pulumi-library/go/pkg/group
+
+replace github.com/VitruvianSoftware/pulumi-library/go/pkg/iam => ../../pulumi-library/go/pkg/iam
+
+replace github.com/VitruvianSoftware/pulumi-library/go/pkg/logging => ../../pulumi-library/go/pkg/logging
+
+replace github.com/VitruvianSoftware/pulumi-library/go/pkg/networking => ../../pulumi-library/go/pkg/networking
+
+replace github.com/VitruvianSoftware/pulumi-library/go/pkg/policy => ../../pulumi-library/go/pkg/policy
+
+replace github.com/VitruvianSoftware/pulumi-library/go/pkg/project => ../../pulumi-library/go/pkg/project
+
+replace github.com/VitruvianSoftware/pulumi-library/go/pkg/security => ../../pulumi-library/go/pkg/security
+
+replace github.com/VitruvianSoftware/pulumi-library/go/pkg/storage => ../../pulumi-library/go/pkg/storage
+
+replace github.com/VitruvianSoftware/pulumi-library/go/pkg/vpc_sc => ../../pulumi-library/go/pkg/vpc_sc
