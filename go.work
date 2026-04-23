@@ -1,7 +1,6 @@
 go 1.26.1
 
 use (
-	../pulumi-library/go
 	./0-bootstrap
 	./1-org
 	./2-environments
@@ -9,4 +8,18 @@ use (
 	./3-networks-svpc
 	./4-projects
 	./5-app-infra
+	../pulumi-library/go
+	../pulumi-library/go/pkg/app/
+	../pulumi-library/go/pkg/bootstrap/
+	../pulumi-library/go/pkg/cicd/
+	../pulumi-library/go/pkg/data/
+	../pulumi-library/go/pkg/group/
+	../pulumi-library/go/pkg/iam/
+	../pulumi-library/go/pkg/logging/
+	../pulumi-library/go/pkg/networking/
+	../pulumi-library/go/pkg/policy/
+	../pulumi-library/go/pkg/project/
+	../pulumi-library/go/pkg/security/
+	../pulumi-library/go/pkg/storage/
+	../pulumi-library/go/pkg/vpc_sc/
 )
