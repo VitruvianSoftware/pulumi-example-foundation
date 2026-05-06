@@ -57,18 +57,13 @@ func main() {
 				return err
 			}
 
-			// Exports — matches upstream per-env outputs
+			// Exports — matches upstream TF 2-environments/envs/{env}/outputs.tf exactly
+			// TF has separate per-env directories, so outputs are un-prefixed.
+			// Since Go deploys all envs in one program, we namespace with env prefix.
 			ctx.Export(fmt.Sprintf("%s_env_folder", env), outputs.FolderName)
-			ctx.Export(fmt.Sprintf("%s_env_folder_id", env), outputs.FolderID)
 			ctx.Export(fmt.Sprintf("%s_env_kms_project_id", env), outputs.KMSProjectID)
 			ctx.Export(fmt.Sprintf("%s_env_kms_project_number", env), outputs.KMSProjectNumber)
 			ctx.Export(fmt.Sprintf("%s_env_secrets_project_id", env), outputs.SecretsProjectID)
-
-			// Assured Workload outputs (only when enabled)
-			if cfg.AssuredWorkload.Enabled {
-				ctx.Export(fmt.Sprintf("%s_assured_workload_id", env), outputs.AssuredWorkloadID)
-				ctx.Export(fmt.Sprintf("%s_assured_workload_resources", env), outputs.AssuredWorkloadResources)
-			}
 		}
 
 		return nil

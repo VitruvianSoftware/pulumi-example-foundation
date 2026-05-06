@@ -195,8 +195,13 @@ func main() {
 
 		// ACM policy — mirrors TS port (available from VPC-SC module or org policy)
 		ctx.Export("access_context_manager_policy_id", accessContextManagerPolicyID)
-		// Billing sink names — stub for TF parity (billing sinks not deployed in base foundation)
-		ctx.Export("billing_sink_names", pulumi.ToStringArray([]string{}))
+		// Billing sink names — dynamically resolved from centralized logging component
+		// Mirrors TF: module.logs_export.billing_sink_names
+		billingSinkMap := pulumi.Map{}
+		for k, v := range logOutputs.BillingSinkNames {
+			billingSinkMap[k] = v
+		}
+		ctx.Export("billing_sink_names", billingSinkMap)
 
 		return nil
 	})

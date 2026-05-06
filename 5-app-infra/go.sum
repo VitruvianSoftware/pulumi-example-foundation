@@ -7,6 +7,10 @@ github.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERo
 github.com/Microsoft/go-winio v0.6.2/go.mod h1:yd8OoFMLzJbo9gZq8j5qaps8bJ9aShtEA8Ipt1oGCvU=
 github.com/ProtonMail/go-crypto v1.1.6 h1:ZcV+Ropw6Qn0AX9brlQLAUXfqLBc7Bl+f/DmNxpLfdw=
 github.com/ProtonMail/go-crypto v1.1.6/go.mod h1:rA3QumHc/FZ8pAHreoekgiAbzpNsfQAosU5td4SnOrE=
+github.com/VitruvianSoftware/pulumi-library/go/pkg/compute_instance v0.2.0 h1:mzbUrUDBJTDidFOm9LnbAqmB3S0L2dqaM2T8e5w1kVM=
+github.com/VitruvianSoftware/pulumi-library/go/pkg/compute_instance v0.2.0/go.mod h1:RE6OGQE3/rPAQXxV7fhQbJTn5i6YsgEf47a3MHolf1k=
+github.com/VitruvianSoftware/pulumi-library/go/pkg/instance_template v0.2.0 h1:3KzkXn1HdEbjsatsxCf5U1jcJVatCrpPrPW70fseYrU=
+github.com/VitruvianSoftware/pulumi-library/go/pkg/instance_template v0.2.0/go.mod h1:IQhMG7QK/h6eIW/EqkBAhOzVPYw64dzpnaHx5/+o5UI=
 github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da h1:KjTM2ks9d14ZYCvmHS9iAKVt9AyzRSqNU1qabPih5BY=
 github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da/go.mod h1:eHEWzANqSiWQsof+nXEI9bUVUyV6F53Fp89EuCh2EAA=
 github.com/agext/levenshtein v1.2.3 h1:YB2fHEn0UJagG8T1rrWknE3ZQzWM06O8AMAatNn7lmo=

@@ -79,6 +79,7 @@ func main() {
 		ctx.Export("cloudbuild_project_id", cicd.ProjectID)
 		ctx.Export("gcs_bucket_tfstate", seed.StateBucketName)
 		ctx.Export("projects_gcs_bucket_tfstate", seed.ProjectsStateBucketName)
+		ctx.Export("state_bucket_kms_key_id", seed.KMSKeyID)
 		for key, sa := range sas {
 			ctx.Export(key+"_step_terraform_service_account_email", sa.Email)
 		}

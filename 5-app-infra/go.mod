@@ -13,6 +13,8 @@ require (
 	dario.cat/mergo v1.0.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/ProtonMail/go-crypto v1.1.6 // indirect
+	github.com/VitruvianSoftware/pulumi-library/go/pkg/compute_instance v0.2.0 // indirect
+	github.com/VitruvianSoftware/pulumi-library/go/pkg/instance_template v0.2.0 // indirect
 	github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da // indirect
 	github.com/agext/levenshtein v1.2.3 // indirect
 	github.com/apparentlymart/go-textseg/v13 v13.0.0 // indirect
@@ -121,3 +123,5 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	lukechampine.com/frand v1.4.2 // indirect
 )
+
+replace github.com/VitruvianSoftware/pulumi-library/go => ../../pulumi-library/go

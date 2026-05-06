@@ -282,6 +282,8 @@ func main() {
 			perimeterName = pulumi.String("").ToStringOutput()
 		}
 
+		// target_name_server_addresses — pass-through from config (mirrors TF exactly)
+		ctx.Export("target_name_server_addresses", pulumi.ToStringArray(cfg.TargetNameServers))
 		ctx.Export("access_context_manager_policy_id", acmPolicyID)
 		ctx.Export("shared_vpc_host_project_id", pulumi.String(cfg.ProjectID))
 		ctx.Export("network_name", vpcModule.VPC.Name)
@@ -301,7 +303,14 @@ func main() {
 		ctx.Export("subnets_names", subnetNames)
 		ctx.Export("subnets_ips", subnetIPs)
 		ctx.Export("subnets_self_links", subnetSelfLinks)
-		ctx.Export("subnets_secondary_ranges", pulumi.ToStringArray([]string{}))
+
+		// subnets_secondary_ranges — dynamically resolved from subnet resources
+		// Mirrors TF: module.base_env.subnets_secondary_ranges
+		secondaryRangesMap := pulumi.Map{}
+		for subnetName, subnet := range vpcModule.Subnets {
+			secondaryRangesMap[subnetName] = subnet.SecondaryIpRanges
+		}
+		ctx.Export("subnets_secondary_ranges", secondaryRangesMap)
 
 		return nil
 	})

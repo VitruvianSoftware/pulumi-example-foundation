@@ -1,0 +1,136 @@
+// Copyright 2026 Vitruvian Software
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// ============================================================================
+// Terraform Cloud CI/CD Provider — Example
+// ============================================================================
+//
+// This file is an EXAMPLE showing how to replace the default GitHub Actions
+// CI/CD provider with Terraform Cloud Agents on GKE.
+// This mirrors the Terraform foundation's `build_terraform_cloud.tf.example`.
+//
+// To use TFC instead of GitHub Actions:
+//
+// 1. Rename this file: build_terraform_cloud.go.example → build_terraform_cloud.go
+// 2. Remove or rename: build_github_actions.go → build_github_actions.go.bak
+// 3. Update main.go to call deployTFCBuild instead of deployGitHubActionsBuild
+// 4. Run `pulumi up` to provision the TFC infrastructure.
+//
+// ============================================================================
+
+package main
+
+import (
+	"fmt"
+
+	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/container"
+	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/organizations"
+	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/projects"
+	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/serviceaccount"
+	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
+)
+
+// TFCBuildOutputs holds the outputs from Terraform Cloud provisioning.
+type TFCBuildOutputs struct {
+	CICDProjectID pulumi.StringOutput
+}
+
+// deployTFCBuild provisions the infrastructure for a Terraform Cloud agent
+// running on GKE. This includes the project, network, NAT, GKE cluster,
+// and IAM bindings.
+func deployTFCBuild(ctx *pulumi.Context, cfg *Config, sas map[string]*serviceaccount.Account) (*TFCBuildOutputs, error) {
+	outputs := &TFCBuildOutputs{}
+
+	// Create CICD Project
+	projectPrefix := cfg.ProjectPrefix
+	if projectPrefix == "" {
+		projectPrefix = "prj"
+	}
+	cicdProject, err := projects.NewProject(ctx, "cicd-project", &projects.ProjectArgs{
+		ProjectId:      pulumi.String(fmt.Sprintf("%s-b-cicd", projectPrefix)),
+		Name:           pulumi.String(fmt.Sprintf("%s-b-cicd", projectPrefix)),
+		FolderId:       pulumi.String(cfg.FolderID),
+		BillingAccount: pulumi.String(cfg.BillingAccount),
+	})
+	if err != nil {
+		return nil, err
+	}
+	outputs.CICDProjectID = cicdProject.ProjectId
+
+	// TFC Agent Service Account
+	agentSA, err := serviceaccount.NewAccount(ctx, "tfc-agent-sa", &serviceaccount.AccountArgs{
+		Project:     cicdProject.ProjectId,
+		AccountId:   pulumi.String("sa-tfc-agent"),
+		DisplayName: pulumi.String("TFC Agent Service Account"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// GKE Cluster for TFC Agents
+	_, err = container.NewCluster(ctx, "tfc-agent-cluster", &container.ClusterArgs{
+		Project:                 cicdProject.ProjectId,
+		Name:                    pulumi.String("tfc-agent-cluster"),
+		Location:                pulumi.String(cfg.DefaultRegion),
+		InitialNodeCount:        pulumi.Int(1),
+		RemoveDefaultNodePool:   pulumi.Bool(true),
+		// Network config would normally go here
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// GKE Node Pool
+	_, err = container.NewNodePool(ctx, "tfc-agent-nodepool", &container.NodePoolArgs{
+		Project:  cicdProject.ProjectId,
+		Name:     pulumi.String("tfc-agent-pool"),
+		Cluster:  pulumi.String("tfc-agent-cluster"),
+		Location: pulumi.String(cfg.DefaultRegion),
+		NodeCount: pulumi.Int(1),
+		NodeConfig: &container.NodePoolNodeConfigArgs{
+			MachineType:    pulumi.String("n1-standard-4"),
+			ServiceAccount: agentSA.Email,
+			OauthScopes: pulumi.StringArray{
+				pulumi.String("https://www.googleapis.com/auth/cloud-platform"),
+			},
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Grant roles/browser to the TFC SA at the Org level
+	_, err = organizations.NewIAMMember(ctx, "tfc-sa-org-browser", &organizations.IAMMemberArgs{
+		OrgId:  pulumi.String(cfg.OrgID),
+		Role:   pulumi.String("roles/browser"),
+		Member: pulumi.Sprintf("serviceAccount:%s", agentSA.Email),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Allow TFC SA to impersonate the Terraform environment SAs
+	for _, sa := range sas {
+		_, err = serviceaccount.NewIAMMember(ctx, fmt.Sprintf("tfc-impersonate-%s", sa.Name), &serviceaccount.IAMMemberArgs{
+			ServiceAccountId: sa.Name,
+			Role:             pulumi.String("roles/iam.serviceAccountTokenCreator"),
+			Member:           pulumi.Sprintf("serviceAccount:%s", agentSA.Email),
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return outputs, nil
+}
