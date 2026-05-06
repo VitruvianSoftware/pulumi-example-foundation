@@ -3,8 +3,8 @@ module foundation-3-networks-svpc
 go 1.26.1
 
 require (
-	github.com/VitruvianSoftware/pulumi-library/go/pkg/networking v0.2.0
-	github.com/VitruvianSoftware/pulumi-library/go/pkg/vpc_sc v0.2.0
+	github.com/VitruvianSoftware/pulumi-library/go/pkg/networking v0.4.0
+	github.com/VitruvianSoftware/pulumi-library/go/pkg/vpc_sc v0.4.0
 	github.com/pulumi/pulumi-gcp/sdk/v9 v9.20.0
 	github.com/pulumi/pulumi/sdk/v3 v3.231.0
 	github.com/stretchr/testify v1.11.1

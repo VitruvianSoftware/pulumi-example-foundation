@@ -9,10 +9,10 @@ github.com/ProtonMail/go-crypto v1.1.6 h1:ZcV+Ropw6Qn0AX9brlQLAUXfqLBc7Bl+f/DmNx
 github.com/ProtonMail/go-crypto v1.1.6/go.mod h1:rA3QumHc/FZ8pAHreoekgiAbzpNsfQAosU5td4SnOrE=
 github.com/VitruvianSoftware/pulumi-library/go v0.0.0-20260423175544-55433459ca63 h1:KYpDlxSn6uS6UH876kobIA7fgd6MtAtqeYI6wIzBQ/g=
 github.com/VitruvianSoftware/pulumi-library/go v0.0.0-20260423175544-55433459ca63/go.mod h1:ky/UwWj4SMMTgFZtE1eEPu0ISOBCnE0E5GtEQ6lnzIM=
-github.com/VitruvianSoftware/pulumi-library/go/pkg/networking v0.2.0 h1:5LdLscASaUnnyVxJifM1RU1rjiOn+7Rd06qrtf+vU2s=
-github.com/VitruvianSoftware/pulumi-library/go/pkg/networking v0.2.0/go.mod h1:cAm3CjuDUHS8s9WZCm4bg3kZMEeb0bDF6/n1LaT09go=
-github.com/VitruvianSoftware/pulumi-library/go/pkg/vpc_sc v0.2.0 h1:cfRMO7G3cDHrM6MBDFvQV68URwpEfUgtltn0VMFua/g=
-github.com/VitruvianSoftware/pulumi-library/go/pkg/vpc_sc v0.2.0/go.mod h1:3Z4zMeK0/bj9q8xoSuzBtdRofuNrLIsgWqVEKbMSD2I=
+github.com/VitruvianSoftware/pulumi-library/go/pkg/networking v0.4.0 h1:X8feD/OLQmpa7EeJC2eSfSspTWDMl0XEPWhtX7oNrpY=
+github.com/VitruvianSoftware/pulumi-library/go/pkg/networking v0.4.0/go.mod h1:cAm3CjuDUHS8s9WZCm4bg3kZMEeb0bDF6/n1LaT09go=
+github.com/VitruvianSoftware/pulumi-library/go/pkg/vpc_sc v0.4.0 h1:W/4DMhN9QdZDgLJWyYfY2DA/U8k5cSNuTZ0DLEf10uc=
+github.com/VitruvianSoftware/pulumi-library/go/pkg/vpc_sc v0.4.0/go.mod h1:3Z4zMeK0/bj9q8xoSuzBtdRofuNrLIsgWqVEKbMSD2I=
 github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da h1:KjTM2ks9d14ZYCvmHS9iAKVt9AyzRSqNU1qabPih5BY=
 github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da/go.mod h1:eHEWzANqSiWQsof+nXEI9bUVUyV6F53Fp89EuCh2EAA=
 github.com/agext/levenshtein v1.2.3 h1:YB2fHEn0UJagG8T1rrWknE3ZQzWM06O8AMAatNn7lmo=
