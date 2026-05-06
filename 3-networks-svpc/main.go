@@ -316,6 +316,7 @@ type NetConfig struct {
 	ParentID                      string
 	PolicyID                      string
 	OrgStackName                  string
+	DNSProjectID                  string
 	Domain                        string
 	PscIP                         string
 	BgpAsn                        int
@@ -347,6 +348,7 @@ func loadNetConfig(ctx *pulumi.Context) *NetConfig {
 		ParentID:     conf.Require("parent_id"),
 		PolicyID:     conf.Get("policy_id"),
 		OrgStackName: conf.Get("org_stack_name"),
+		DNSProjectID: conf.Get("dns_project_id"),
 		Domain:       conf.Get("domain"),
 		PscIP:        conf.Get("psc_ip"),
 	}

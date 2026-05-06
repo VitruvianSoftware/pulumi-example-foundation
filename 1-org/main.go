@@ -22,6 +22,7 @@ import (
 
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi/config"
+	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/accesscontextmanager"
 )
 
 // BootstrapOutputs holds resolved values from the 0-bootstrap StackReference.
