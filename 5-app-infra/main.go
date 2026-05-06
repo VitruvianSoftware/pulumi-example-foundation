@@ -133,7 +133,11 @@ func main() {
 		ctx.Export("project_id", appProjectID)
 		ctx.Export("region", pulumi.String(cfg.Region))
 		ctx.Export("instances_self_links", svpcResult.InstanceSelfLink)
+		ctx.Export("instances_names", svpcResult.InstanceName)
+		ctx.Export("instances_zones", svpcResult.InstanceZone)
 		ctx.Export("peering_instances_self_links", peeringResult.InstanceSelfLink)
+		ctx.Export("peering_instances_names", peeringResult.InstanceName)
+		ctx.Export("peering_instances_zones", peeringResult.InstanceZone)
 
 		if confResult != nil {
 			ctx.Export("confidential_space_project_id", confSpaceProjectID)
@@ -141,6 +145,8 @@ func main() {
 			ctx.Export("workload_identity_pool_id", confResult.WorkloadPoolID)
 			ctx.Export("workload_pool_provider_id", confResult.WorkloadPoolProviderID)
 			ctx.Export("confidential_instances_self_links", confResult.InstanceSelfLink)
+			ctx.Export("confidential_instances_names", confResult.InstanceName)
+			ctx.Export("confidential_instances_zones", confResult.InstanceZone)
 		}
 
 		return nil

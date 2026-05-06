@@ -40,6 +40,8 @@ type EnvBaseArgs struct {
 // EnvBaseResult holds outputs from the env_base deployment.
 type EnvBaseResult struct {
 	InstanceSelfLink pulumi.StringOutput
+	InstanceName     pulumi.StringOutput
+	InstanceZone     pulumi.StringOutput
 }
 
 // deployEnvBase creates a service account and Compute Instance in the target
@@ -107,5 +109,7 @@ func deployEnvBase(ctx *pulumi.Context, name string, args *EnvBaseArgs) (*EnvBas
 
 	return &EnvBaseResult{
 		InstanceSelfLink: inst.SelfLink,
+		InstanceName:     inst.Name,
+		InstanceZone:     inst.Zone,
 	}, nil
 }
