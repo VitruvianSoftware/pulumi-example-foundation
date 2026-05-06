@@ -38,7 +38,7 @@ func main() {
 		// ====================================================================
 		if cfg.Env == "shared" {
 			// 1. Hierarchical Firewall Policy (org/folder level)
-			fwPolicy, err := networking.NewHierarchicalFirewallPolicy(ctx, "hierarchical-fw", &networking.HierarchicalFirewallPolicyArgs{
+			_, err := networking.NewHierarchicalFirewallPolicy(ctx, "hierarchical-fw", &networking.HierarchicalFirewallPolicyArgs{
 				ParentID:      pulumi.String(cfg.ParentID),
 				ShortName:     fmt.Sprintf("fw-%s-svpc-hierarchical", cfg.Env),
 				Description:   "Hierarchical firewall rules",
@@ -49,7 +49,7 @@ func main() {
 				return err
 			}
 
-			ctx.Export("hierarchical_fw", fwPolicy.Policy.ID())
+			// TF 3-networks-svpc shared has no outputs
 			return nil
 		}
 
@@ -240,7 +240,24 @@ func main() {
 			}
 		}
 
+		// Exports — matching TF 3-networks-svpc/envs/{env}/outputs.tf
+		var acmPolicyID pulumi.StringOutput
+		if cfg.OrgStackName != "" {
+			orgStack, err := pulumi.NewStackReference(ctx, "org", &pulumi.StackReferenceArgs{
+				Name: pulumi.String(cfg.OrgStackName),
+			})
+			if err != nil {
+				return err
+			}
+			acmPolicyID = orgStack.GetStringOutput(pulumi.String("access_context_manager_policy_id"))
+		} else {
+			acmPolicyID = pulumi.String("").ToStringOutput()
+		}
+
 		// 10. VPC Service Controls Perimeter
+		var perimeterName pulumi.StringOutput
+		var accessLevelName pulumi.StringOutput
+		var accessLevelDryRunName pulumi.StringOutput
 		if cfg.PolicyID != "" {
 			perimeter, err := vpc_sc.NewVpcServiceControls(ctx, "vpc-sc-perimeter", &vpc_sc.VpcServiceControlsArgs{
 				PolicyID:              pulumi.String(cfg.PolicyID),
@@ -258,21 +275,34 @@ func main() {
 			if err != nil {
 				return err
 			}
-			ctx.Export("service_perimeter_name", perimeter.Perimeter.Name)
+			perimeterName = perimeter.Perimeter.Name
+			accessLevelName = perimeter.AccessLevel.Name
+			accessLevelDryRunName = perimeter.AccessLevelDryRun.Name
+		} else {
+			perimeterName = pulumi.String("").ToStringOutput()
 		}
 
-		ctx.Export("network_id", vpcModule.VPC.ID())
+		ctx.Export("access_context_manager_policy_id", acmPolicyID)
+		ctx.Export("shared_vpc_host_project_id", pulumi.String(cfg.ProjectID))
 		ctx.Export("network_name", vpcModule.VPC.Name)
 		ctx.Export("network_self_link", vpcModule.VPC.SelfLink)
-		ctx.Export("shared_vpc_host_project_id", pulumi.String(cfg.ProjectID))
 		ctx.Export("enforce_vpcsc", pulumi.Bool(cfg.EnforceVpcSc))
+		ctx.Export("service_perimeter_name", perimeterName)
+		ctx.Export("access_level_name", accessLevelName)
+		ctx.Export("access_level_name_dry_run", accessLevelDryRunName)
 
-		// Subnet exports
-		for name, subnet := range vpcModule.Subnets {
-			ctx.Export(fmt.Sprintf("subnet_%s_name", name), subnet.Name)
-			ctx.Export(fmt.Sprintf("subnet_%s_ip", name), subnet.IpCidrRange)
-			ctx.Export(fmt.Sprintf("subnet_%s_self_link", name), subnet.SelfLink)
+		// Subnet exports as arrays (matching TF subnets_names/ips/self_links/secondary_ranges)
+		var subnetNames, subnetIPs, subnetSelfLinks pulumi.StringArray
+		for _, subnet := range vpcModule.Subnets {
+			subnetNames = append(subnetNames, subnet.Name)
+			subnetIPs = append(subnetIPs, subnet.IpCidrRange)
+			subnetSelfLinks = append(subnetSelfLinks, subnet.SelfLink)
 		}
+		ctx.Export("subnets_names", subnetNames)
+		ctx.Export("subnets_ips", subnetIPs)
+		ctx.Export("subnets_self_links", subnetSelfLinks)
+		ctx.Export("subnets_secondary_ranges", pulumi.ToStringArray([]string{}))
+
 		return nil
 	})
 }
@@ -285,6 +315,7 @@ type NetConfig struct {
 	Region2                       string
 	ParentID                      string
 	PolicyID                      string
+	OrgStackName                  string
 	DNSProjectID                  string
 	Domain                        string
 	PscIP                         string
@@ -315,9 +346,10 @@ func loadNetConfig(ctx *pulumi.Context) *NetConfig {
 		Region1:      conf.Get("region1"),
 		Region2:      conf.Get("region2"),
 		ParentID:     conf.Require("parent_id"),
-		Domain:       conf.Get("domain"),
 		PolicyID:     conf.Get("policy_id"),
+		OrgStackName: conf.Get("org_stack_name"),
 		DNSProjectID: conf.Get("dns_project_id"),
+		Domain:       conf.Get("domain"),
 		PscIP:        conf.Get("psc_ip"),
 	}
 	conf.GetObject("vpc_sc_members", &c.VpcScMembers)
@@ -352,6 +384,9 @@ func loadNetConfig(ctx *pulumi.Context) *NetConfig {
 	}
 	if c.Domain == "" {
 		c.Domain = "example.com."
+	}
+	if c.OrgStackName == "" {
+		c.OrgStackName = "org"
 	}
 	if c.PscIP == "" {
 		c.PscIP = "10.17.0.6"

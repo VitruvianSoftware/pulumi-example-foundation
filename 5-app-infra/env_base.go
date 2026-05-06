@@ -42,6 +42,7 @@ type EnvBaseResult struct {
 	InstanceSelfLink pulumi.StringOutput
 	InstanceName     pulumi.StringOutput
 	InstanceZone     pulumi.StringOutput
+	InstanceDetails  pulumi.MapOutput
 }
 
 // deployEnvBase creates a service account and Compute Instance in the target
@@ -111,5 +112,12 @@ func deployEnvBase(ctx *pulumi.Context, name string, args *EnvBaseArgs) (*EnvBas
 		InstanceSelfLink: inst.SelfLink,
 		InstanceName:     inst.Name,
 		InstanceZone:     inst.Zone,
+		InstanceDetails: pulumi.All(inst.Name, inst.Zone, inst.SelfLink).ApplyT(func(args []interface{}) map[string]interface{} {
+			return map[string]interface{}{
+				"name":     args[0],
+				"zone":     args[1],
+				"selfLink": args[2],
+			}
+		}).(pulumi.MapOutput),
 	}, nil
 }

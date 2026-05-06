@@ -84,7 +84,8 @@ func main() {
 		buFolderID := buFolder.ID().ApplyT(func(id pulumi.ID) string {
 			return string(id)
 		}).(pulumi.StringOutput)
-		projects, err := deployBusinessUnitProjects(ctx, cfg, buFolderID, networkProjectID, perimeterName, kmsProjectID)
+		acmPolicyID := orgStack.GetStringOutput(pulumi.String("access_context_manager_policy_id"))
+		projects, err := deployBusinessUnitProjects(ctx, cfg, buFolderID, networkProjectID, perimeterName, kmsProjectID, acmPolicyID)
 		if err != nil {
 			return err
 		}
@@ -102,30 +103,39 @@ func main() {
 
 		// 6. Deploy Infra Pipeline Project (under common folder)
 		commonFolderID := orgStack.GetStringOutput(pulumi.String("common_folder_id"))
-		infraPipeline, err := deployInfraPipelineProject(ctx, cfg, commonFolderID)
+		_, err = deployInfraPipelineProject(ctx, cfg, commonFolderID)
 		if err != nil {
 			return err
 		}
 
-		// 7. Exports — matching upstream outputs.tf
-		ctx.Export("bu_folder_id", buFolder.ID())
-		ctx.Export("svpc_project_id", projects.SVPCProjectID)
-		ctx.Export("floating_project_id", projects.FloatingProjectID)
-		ctx.Export("peering_project_id", projects.PeeringProjectID)
+		// 7. Exports — matching TF 4-projects/business_unit_1/{env}/outputs.tf
+		ctx.Export("shared_vpc_project", projects.SVPCProjectID)
+		ctx.Export("shared_vpc_project_number", projects.SVPCProjectNumber)
+		ctx.Export("floating_project", projects.FloatingProjectID)
+		ctx.Export("peering_project", projects.PeeringProjectID)
 		ctx.Export("peering_network", projects.PeeringNetworkSelfLink)
 		ctx.Export("peering_subnetwork_self_link", projects.PeeringSubnetSelfLink)
 		ctx.Export("iap_firewall_tags", projects.IAPFirewallTags)
-		ctx.Export("infra_pipeline_project_id", infraPipeline)
-		ctx.Export("network_project_id", networkProjectID)
 		if projects.CMEKBucket != nil {
-			ctx.Export("cmek_bucket", *projects.CMEKBucket)
-			ctx.Export("cmek_keyring", *projects.CMEKKeyring)
+			ctx.Export("bucket", *projects.CMEKBucket)
+			ctx.Export("keyring", *projects.CMEKKeyring)
+		}
+		if projects.CMEKKeys != nil {
+			ctx.Export("keys", *projects.CMEKKeys)
+		} else {
+			ctx.Export("keys", pulumi.ToStringArray([]string{}))
 		}
 		if projects.ConfSpaceProjectID != nil {
-			ctx.Export("confidential_space_project_id", *projects.ConfSpaceProjectID)
+			ctx.Export("confidential_space_project", *projects.ConfSpaceProjectID)
 			ctx.Export("confidential_space_project_number", *projects.ConfSpaceProjectNumber)
 			ctx.Export("confidential_space_workload_sa", *projects.ConfSpaceWorkloadSA)
 		}
+		ctx.Export("default_region", pulumi.String(cfg.Region))
+		ctx.Export("subnets_self_links", projects.SubnetsSelfLinks)
+		ctx.Export("restricted_enabled_apis", pulumi.ToStringArray(projects.RestrictedEnabledApis))
+		ctx.Export("vpc_service_control_perimeter_name", projects.VPCSCPerimeterName)
+		ctx.Export("peering_complete", projects.PeeringComplete)
+		ctx.Export("access_context_manager_policy_id", projects.AccessContextManagerPolicyID)
 
 		return nil
 	})

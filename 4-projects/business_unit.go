@@ -27,17 +27,24 @@ import (
 
 // BUProjects holds outputs from business unit project deployment.
 type BUProjects struct {
-	SVPCProjectID          pulumi.StringOutput
-	FloatingProjectID      pulumi.StringOutput
-	PeeringProjectID       pulumi.StringOutput
-	PeeringNetworkSelfLink pulumi.StringOutput
-	PeeringSubnetSelfLink  pulumi.StringOutput
-	IAPFirewallTags        pulumi.MapOutput
-	CMEKBucket             *pulumi.StringOutput
-	CMEKKeyring            *pulumi.StringOutput
-	ConfSpaceProjectID     *pulumi.StringOutput
-	ConfSpaceProjectNumber *pulumi.StringOutput
-	ConfSpaceWorkloadSA    *pulumi.StringOutput
+	SVPCProjectID                pulumi.StringOutput
+	SVPCProjectNumber            pulumi.StringOutput
+	FloatingProjectID            pulumi.StringOutput
+	PeeringProjectID             pulumi.StringOutput
+	PeeringNetworkSelfLink       pulumi.StringOutput
+	PeeringSubnetSelfLink        pulumi.StringOutput
+	IAPFirewallTags              pulumi.MapOutput
+	CMEKBucket                   *pulumi.StringOutput
+	CMEKKeyring                  *pulumi.StringOutput
+	CMEKKeys                     *pulumi.StringArrayOutput
+	ConfSpaceProjectID           *pulumi.StringOutput
+	ConfSpaceProjectNumber       *pulumi.StringOutput
+	ConfSpaceWorkloadSA          *pulumi.StringOutput
+	SubnetsSelfLinks             pulumi.StringArrayOutput
+	VPCSCPerimeterName           pulumi.StringOutput
+	PeeringComplete              pulumi.BoolOutput
+	AccessContextManagerPolicyID pulumi.StringOutput
+	RestrictedEnabledApis        []string
 }
 
 // budgetConfig returns the standard budget configuration used for every
@@ -55,7 +62,7 @@ func budgetConfig(cfg *ProjectsConfig) *project.BudgetConfig {
 //   - SVPC-attached: connected to the Shared VPC host project w/ VPC-SC
 //   - Floating: standalone project, not attached to any VPC
 //   - Peering: project with its own VPC peered to the host network
-func deployBusinessUnitProjects(ctx *pulumi.Context, cfg *ProjectsConfig, folderID, networkProjectID, perimeterName, kmsProjectID pulumi.StringOutput) (*BUProjects, error) {
+func deployBusinessUnitProjects(ctx *pulumi.Context, cfg *ProjectsConfig, folderID, networkProjectID, perimeterName, kmsProjectID, acmPolicyID pulumi.StringOutput) (*BUProjects, error) {
 	result := &BUProjects{}
 
 	// ========================================================================
@@ -63,6 +70,16 @@ func deployBusinessUnitProjects(ctx *pulumi.Context, cfg *ProjectsConfig, folder
 	// This project is attached as a service project to the environment's
 	// Shared VPC host, enabling shared network resource access.
 	// ========================================================================
+	svpcApis := []string{
+		"compute.googleapis.com",
+		"container.googleapis.com",
+		"run.googleapis.com",
+		"artifactregistry.googleapis.com",
+		"billingbudgets.googleapis.com",
+		"logging.googleapis.com",
+		"accesscontextmanager.googleapis.com",
+	}
+
 	svpcProject, err := project.NewProject(ctx, "bu-svpc-project", &project.ProjectArgs{
 		ProjectID:       pulumi.String(fmt.Sprintf("%s-%s-%s-sample-svpc", cfg.ProjectPrefix, cfg.EnvCode, cfg.BusinessCode)),
 		Name:            pulumi.String(fmt.Sprintf("%s-%s-%s-sample-svpc", cfg.ProjectPrefix, cfg.EnvCode, cfg.BusinessCode)),
@@ -71,19 +88,13 @@ func deployBusinessUnitProjects(ctx *pulumi.Context, cfg *ProjectsConfig, folder
 		RandomProjectID: cfg.RandomSuffix,
 		Labels:          projectLabels(cfg, "sample-application", "svpc"),
 		Budget:          budgetConfig(cfg),
-		ActivateApis: []string{
-			"compute.googleapis.com",
-			"container.googleapis.com",
-			"run.googleapis.com",
-			"artifactregistry.googleapis.com",
-			"billingbudgets.googleapis.com",
-			"logging.googleapis.com",
-			"accesscontextmanager.googleapis.com",
-		},
+		ActivateApis:    svpcApis,
 	})
 	if err != nil {
 		return nil, err
 	}
+
+	result.RestrictedEnabledApis = svpcApis
 
 	// Attach as a Shared VPC service project
 	if _, err := compute.NewSharedVPCServiceProject(ctx, "svpc-attachment", &compute.SharedVPCServiceProjectArgs{
@@ -108,6 +119,7 @@ func deployBusinessUnitProjects(ctx *pulumi.Context, cfg *ProjectsConfig, folder
 	}
 
 	result.SVPCProjectID = svpcProject.Project.ProjectId
+	result.SVPCProjectNumber = svpcProject.Project.Number
 
 	// ========================================================================
 	// 2. Floating Project (not attached to any VPC)
@@ -179,6 +191,17 @@ func deployBusinessUnitProjects(ctx *pulumi.Context, cfg *ProjectsConfig, folder
 		result.CMEKBucket = &cmekResult.BucketName
 		result.CMEKKeyring = &cmekResult.KeyringName
 	}
+
+	// Populate TF-parity outputs
+	if cfg.PeeringEnabled {
+		result.SubnetsSelfLinks = pulumi.StringArray{result.PeeringSubnetSelfLink}.ToStringArrayOutput()
+		result.PeeringComplete = pulumi.Bool(true).ToBoolOutput()
+	} else {
+		result.SubnetsSelfLinks = pulumi.ToStringArray([]string{}).ToStringArrayOutput()
+		result.PeeringComplete = pulumi.Bool(false).ToBoolOutput()
+	}
+	result.VPCSCPerimeterName = perimeterName
+	result.AccessContextManagerPolicyID = acmPolicyID
 
 	return result, nil
 }

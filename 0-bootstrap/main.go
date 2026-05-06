@@ -74,16 +74,13 @@ func main() {
 			return err
 		}
 
-		// 6. Exports
+		// 6. Exports — matching TF outputs.tf
 		ctx.Export("seed_project_id", seed.ProjectID)
-		ctx.Export("cicd_project_id", cicd.ProjectID)
-		ctx.Export("bootstrap_folder_id", bootstrapFolder.ID())
-		ctx.Export("bootstrap_folder_name", bootstrapFolder.Name)
-		ctx.Export("tf_state_bucket", seed.StateBucketName)
+		ctx.Export("cloudbuild_project_id", cicd.ProjectID)
+		ctx.Export("gcs_bucket_tfstate", seed.StateBucketName)
 		ctx.Export("projects_gcs_bucket_tfstate", seed.ProjectsStateBucketName)
-		ctx.Export("state_bucket_kms_key_id", seed.KMSKeyID)
 		for key, sa := range sas {
-			ctx.Export(key+"_sa_email", sa.Email)
+			ctx.Export(key+"_step_terraform_service_account_email", sa.Email)
 		}
 
 		// 7. Common config — composite output consumed by all downstream
