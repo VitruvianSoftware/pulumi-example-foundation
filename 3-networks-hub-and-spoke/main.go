@@ -49,7 +49,7 @@ func main() {
 		// ====================================================================
 		if cfg.Env == "shared" {
 			// 1. Hierarchical Firewall Policy (org/folder level)
-			fwPolicy, err := networking.NewHierarchicalFirewallPolicy(ctx, "hierarchical-fw", &networking.HierarchicalFirewallPolicyArgs{
+			_, err := networking.NewHierarchicalFirewallPolicy(ctx, "hierarchical-fw", &networking.HierarchicalFirewallPolicyArgs{
 				ParentID:      pulumi.String(cfg.ParentID),
 				ShortName:     fmt.Sprintf("fw-%s-svpc-hierarchical", cfg.Env),
 				Description:   "Hierarchical firewall rules",
@@ -128,7 +128,7 @@ func main() {
 			}
 
 			// 6. DNS Policy on hub
-			_, err = dns.NewPolicy(ctx, "hub-dns-policy", &dns.PolicyArgs{
+			hubDnsPolicy, err := dns.NewPolicy(ctx, "hub-dns-policy", &dns.PolicyArgs{
 				Project:                 pulumi.String(cfg.HubProjectID),
 				Name:                    pulumi.String(fmt.Sprintf("dp-%s-hub-default-policy", cfg.EnvCode)),
 				EnableInboundForwarding: pulumi.Bool(true),
@@ -209,11 +209,10 @@ func main() {
 				}
 			}
 
-			ctx.Export("hierarchical_fw", fwPolicy.Policy.ID())
-			ctx.Export("hub_vpc_id", hubVpc.VPC.ID())
+			// Exports — matching TF 3-networks-hub-and-spoke/envs/shared/outputs.tf
 			ctx.Export("shared_vpc_host_project_id", pulumi.String(cfg.HubProjectID))
 			ctx.Export("network_name", hubVpc.VPC.Name)
-			ctx.Export("network_self_link", hubVpc.VPC.SelfLink)
+			ctx.Export("dns_policy", hubDnsPolicy.ID()) // DNS policy ID
 			return nil
 		}
 
@@ -371,6 +370,9 @@ func main() {
 		}
 
 		// VPC-SC on spoke
+		var perimeterName pulumi.StringOutput
+		var accessLevelName pulumi.StringOutput
+		var accessLevelDryRunName pulumi.StringOutput
 		if cfg.PolicyID != "" {
 			perimeter, err := vpc_sc.NewVpcServiceControls(ctx, "vpc-sc-perimeter", &vpc_sc.VpcServiceControlsArgs{
 				PolicyID:              pulumi.String(cfg.PolicyID),
@@ -388,20 +390,50 @@ func main() {
 			if err != nil {
 				return err
 			}
-			ctx.Export("service_perimeter_name", perimeter.Perimeter.Name)
+			perimeterName = perimeter.Perimeter.Name
+			accessLevelName = perimeter.AccessLevel.Name
+			accessLevelDryRunName = perimeter.AccessLevelDryRun.Name
+		} else {
+			perimeterName = pulumi.String("").ToStringOutput()
+			accessLevelName = pulumi.String("").ToStringOutput()
+			accessLevelDryRunName = pulumi.String("").ToStringOutput()
 		}
 
-		ctx.Export("spoke_vpc_id", spokeVpc.VPC.ID())
+		var acmPolicyID pulumi.StringOutput
+		if cfg.OrgStackName != "" {
+			orgStack, err := pulumi.NewStackReference(ctx, "org", &pulumi.StackReferenceArgs{
+				Name: pulumi.String(cfg.OrgStackName),
+			})
+			if err != nil {
+				return err
+			}
+			acmPolicyID = orgStack.GetStringOutput(pulumi.String("access_context_manager_policy_id"))
+		} else {
+			acmPolicyID = pulumi.String("").ToStringOutput()
+		}
+
+		// Exports — matching TF 3-networks-hub-and-spoke/envs/{env}/outputs.tf
+		ctx.Export("access_context_manager_policy_id", acmPolicyID)
 		ctx.Export("shared_vpc_host_project_id", pulumi.String(cfg.SpokeProjectID))
 		ctx.Export("network_name", spokeVpc.VPC.Name)
 		ctx.Export("network_self_link", spokeVpc.VPC.SelfLink)
 
-		// Subnet exports
-		for name, subnet := range spokeVpc.Subnets {
-			ctx.Export(fmt.Sprintf("subnet_%s_name", name), subnet.Name)
-			ctx.Export(fmt.Sprintf("subnet_%s_ip", name), subnet.IpCidrRange)
-			ctx.Export(fmt.Sprintf("subnet_%s_self_link", name), subnet.SelfLink)
+		// Subnet exports as arrays (matching TF subnets_names/ips/self_links/secondary_ranges)
+		var subnetNames, subnetIPs, subnetSelfLinks pulumi.StringArray
+		for _, subnet := range spokeVpc.Subnets {
+			subnetNames = append(subnetNames, subnet.Name)
+			subnetIPs = append(subnetIPs, subnet.IpCidrRange)
+			subnetSelfLinks = append(subnetSelfLinks, subnet.SelfLink)
 		}
+		ctx.Export("subnets_names", subnetNames)
+		ctx.Export("subnets_ips", subnetIPs)
+		ctx.Export("subnets_self_links", subnetSelfLinks)
+		ctx.Export("subnets_secondary_ranges", pulumi.ToStringArray([]string{}))
+		ctx.Export("enforce_vpcsc", pulumi.Bool(cfg.EnforceVpcSc))
+		ctx.Export("service_perimeter_name", perimeterName)
+		ctx.Export("access_level_name", accessLevelName)
+		ctx.Export("access_level_name_dry_run", accessLevelDryRunName)
+
 		return nil
 	})
 }
@@ -416,6 +448,7 @@ type NetConfig struct {
 	ParentID                      string
 	Domain                        string
 	PolicyID                      string
+	OrgStackName                  string
 	PscIP                         string
 	BgpAsn                        int
 	NatBgpAsn                     int
@@ -447,6 +480,7 @@ func loadNetConfig(ctx *pulumi.Context) *NetConfig {
 		ParentID:       conf.Get("parent_id"),
 		Domain:         conf.Get("domain"),
 		PolicyID:       conf.Get("policy_id"),
+		OrgStackName:   conf.Get("org_stack_name"),
 		PscIP:          conf.Get("psc_ip"),
 	}
 	conf.GetObject("vpc_sc_members", &c.VpcScMembers)
@@ -481,6 +515,9 @@ func loadNetConfig(ctx *pulumi.Context) *NetConfig {
 	}
 	if c.Domain == "" {
 		c.Domain = "example.com."
+	}
+	if c.OrgStackName == "" {
+		c.OrgStackName = "org"
 	}
 	if c.PscIP == "" {
 		c.PscIP = "10.17.0.6"

@@ -45,13 +45,13 @@ func main() {
 		}
 
 		// --- Resolve outputs from 4-projects ---
-		appProjectID := projStack.GetStringOutput(pulumi.String("svpc_project_id"))
-		peeringProjectID := projStack.GetStringOutput(pulumi.String("peering_project_id"))
-		confSpaceProjectID := projStack.GetStringOutput(pulumi.String("confidential_space_project_id"))
+		appProjectID := projStack.GetStringOutput(pulumi.String("shared_vpc_project"))
+		peeringProjectID := projStack.GetStringOutput(pulumi.String("peering_project"))
+		confSpaceProjectID := projStack.GetStringOutput(pulumi.String("confidential_space_project"))
 		confSpaceProjectNumber := projStack.GetStringOutput(pulumi.String("confidential_space_project_number"))
 		confSpaceWorkloadSA := projStack.GetStringOutput(pulumi.String("confidential_space_workload_sa"))
 		peeringSubnetSelfLink := projStack.GetStringOutput(pulumi.String("peering_subnetwork_self_link"))
-		networkProjectID := projStack.GetStringOutput(pulumi.String("network_project_id"))
+		networkProjectID := projStack.GetStringOutput(pulumi.String("shared_vpc_project"))
 
 		// IAP firewall tags come as a map[string]interface{} from stack references;
 		// convert to map[string]string for the Compute Instance params.
@@ -69,7 +69,7 @@ func main() {
 		}).(pulumi.StringMapOutput)
 
 		// --- Resolve outputs from 0-bootstrap ---
-		cicdProjectID := bootstrapStack.GetStringOutput(pulumi.String("cicd_project_id"))
+		cicdProjectID := bootstrapStack.GetStringOutput(pulumi.String("cloudbuild_project_id"))
 
 		// Reconstruct SVPC subnet self link from deterministic naming convention
 		svpcSubnetSelfLink := pulumi.Sprintf(
@@ -93,7 +93,7 @@ func main() {
 		}
 
 		// 4. Deploy Peering Instance (upstream: module "peering_gce_instance" with project_suffix = "sample-peering")
-		peeringResult, err := deployEnvBase(ctx, "sample-peering", &EnvBaseArgs{
+		_, err = deployEnvBase(ctx, "sample-peering", &EnvBaseArgs{
 			Env:                cfg.Env,
 			BusinessUnit:       cfg.BusinessCode,
 			ProjectSuffix:      "sample-peering",
@@ -129,24 +129,23 @@ func main() {
 			}
 		}
 
-		// 6. Exports — matching upstream outputs.tf
+		// 6. Exports — matching TF 5-app-infra/business_unit_1/{env}/outputs.tf
 		ctx.Export("project_id", appProjectID)
 		ctx.Export("region", pulumi.String(cfg.Region))
 		ctx.Export("instances_self_links", svpcResult.InstanceSelfLink)
 		ctx.Export("instances_names", svpcResult.InstanceName)
 		ctx.Export("instances_zones", svpcResult.InstanceZone)
-		ctx.Export("peering_instances_self_links", peeringResult.InstanceSelfLink)
-		ctx.Export("peering_instances_names", peeringResult.InstanceName)
-		ctx.Export("peering_instances_zones", peeringResult.InstanceZone)
+		ctx.Export("instances_details", svpcResult.InstanceDetails)
+		ctx.Export("available_zones", pulumi.ToStringArray([]string{cfg.Region + "-a"}))
 
 		if confResult != nil {
 			ctx.Export("confidential_space_project_id", confSpaceProjectID)
 			ctx.Export("confidential_space_project_number", confSpaceProjectNumber)
 			ctx.Export("workload_identity_pool_id", confResult.WorkloadPoolID)
 			ctx.Export("workload_pool_provider_id", confResult.WorkloadPoolProviderID)
-			ctx.Export("confidential_instances_self_links", confResult.InstanceSelfLink)
 			ctx.Export("confidential_instances_names", confResult.InstanceName)
 			ctx.Export("confidential_instances_zones", confResult.InstanceZone)
+			ctx.Export("confidential_available_zones", pulumi.ToStringArray([]string{cfg.Region + "-a"}))
 		}
 
 		return nil

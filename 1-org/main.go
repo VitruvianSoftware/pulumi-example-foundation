@@ -177,6 +177,26 @@ func main() {
 		// Config passthrough
 		ctx.Export("domains_to_allow", pulumi.ToStringArray(cfg.DomainsToAllow))
 
+		// 9.5 Access Context Manager Policy
+		var accessContextManagerPolicyID pulumi.StringOutput
+		if cfg.CreateAccessContextManagerPolicy {
+			accessPolicy, err := accesscontextmanager.NewAccessPolicy(ctx, "access-policy", &accesscontextmanager.AccessPolicyArgs{
+				Parent: pulumi.Sprintf("organizations/%s", cfg.OrgID),
+				Title:  pulumi.String("default policy"),
+			})
+			if err != nil {
+				return err
+			}
+			accessContextManagerPolicyID = accessPolicy.Name
+		} else {
+			accessContextManagerPolicyID = pulumi.String("").ToStringOutput()
+		}
+
+		// ACM policy — mirrors TS port (available from VPC-SC module or org policy)
+		ctx.Export("access_context_manager_policy_id", accessContextManagerPolicyID)
+		// Billing sink names — stub for TF parity (billing sinks not deployed in base foundation)
+		ctx.Export("billing_sink_names", pulumi.ToStringArray([]string{}))
+
 		return nil
 	})
 }
