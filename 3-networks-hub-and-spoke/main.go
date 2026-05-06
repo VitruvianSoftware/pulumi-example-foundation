@@ -211,6 +211,9 @@ func main() {
 
 			ctx.Export("hierarchical_fw", fwPolicy.Policy.ID())
 			ctx.Export("hub_vpc_id", hubVpc.VPC.ID())
+			ctx.Export("shared_vpc_host_project_id", pulumi.String(cfg.HubProjectID))
+			ctx.Export("network_name", hubVpc.VPC.Name)
+			ctx.Export("network_self_link", hubVpc.VPC.SelfLink)
 			return nil
 		}
 
@@ -389,6 +392,16 @@ func main() {
 		}
 
 		ctx.Export("spoke_vpc_id", spokeVpc.VPC.ID())
+		ctx.Export("shared_vpc_host_project_id", pulumi.String(cfg.SpokeProjectID))
+		ctx.Export("network_name", spokeVpc.VPC.Name)
+		ctx.Export("network_self_link", spokeVpc.VPC.SelfLink)
+
+		// Subnet exports
+		for name, subnet := range spokeVpc.Subnets {
+			ctx.Export(fmt.Sprintf("subnet_%s_name", name), subnet.Name)
+			ctx.Export(fmt.Sprintf("subnet_%s_ip", name), subnet.IpCidrRange)
+			ctx.Export(fmt.Sprintf("subnet_%s_self_link", name), subnet.SelfLink)
+		}
 		return nil
 	})
 }

@@ -263,6 +263,16 @@ func main() {
 
 		ctx.Export("network_id", vpcModule.VPC.ID())
 		ctx.Export("network_name", vpcModule.VPC.Name)
+		ctx.Export("network_self_link", vpcModule.VPC.SelfLink)
+		ctx.Export("shared_vpc_host_project_id", pulumi.String(cfg.ProjectID))
+		ctx.Export("enforce_vpcsc", pulumi.Bool(cfg.EnforceVpcSc))
+
+		// Subnet exports
+		for name, subnet := range vpcModule.Subnets {
+			ctx.Export(fmt.Sprintf("subnet_%s_name", name), subnet.Name)
+			ctx.Export(fmt.Sprintf("subnet_%s_ip", name), subnet.IpCidrRange)
+			ctx.Export(fmt.Sprintf("subnet_%s_self_link", name), subnet.SelfLink)
+		}
 		return nil
 	})
 }

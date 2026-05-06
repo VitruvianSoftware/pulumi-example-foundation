@@ -46,6 +46,8 @@ type ConfidentialSpaceArgs struct {
 // ConfidentialSpaceResult holds outputs from the Confidential Space deployment.
 type ConfidentialSpaceResult struct {
 	InstanceSelfLink       pulumi.StringOutput
+	InstanceName           pulumi.StringOutput
+	InstanceZone           pulumi.StringOutput
 	WorkloadPoolID         pulumi.StringOutput
 	WorkloadPoolProviderID pulumi.StringOutput
 }
@@ -171,6 +173,8 @@ func deployConfidentialSpace(ctx *pulumi.Context, name string, args *Confidentia
 
 	return &ConfidentialSpaceResult{
 		InstanceSelfLink:       inst.SelfLink,
+		InstanceName:           inst.Name,
+		InstanceZone:           inst.Zone,
 		WorkloadPoolID:         pool.WorkloadIdentityPoolId,
 		WorkloadPoolProviderID: provider.WorkloadIdentityPoolProviderId,
 	}, nil
