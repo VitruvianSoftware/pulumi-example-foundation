@@ -12,13 +12,25 @@ use (
 	../pulumi-library/go/pkg/app/
 	../pulumi-library/go/pkg/bootstrap/
 	../pulumi-library/go/pkg/cicd/
+	../pulumi-library/go/pkg/cloud_dns/
+	../pulumi-library/go/pkg/cloud_functions/
+	../pulumi-library/go/pkg/cloud_router/
+	../pulumi-library/go/pkg/compute_instance/
 	../pulumi-library/go/pkg/data/
+	../pulumi-library/go/pkg/gcloud/
 	../pulumi-library/go/pkg/group/
 	../pulumi-library/go/pkg/iam/
+	../pulumi-library/go/pkg/instance_template/
+	../pulumi-library/go/pkg/kms/
+	../pulumi-library/go/pkg/log_export/
 	../pulumi-library/go/pkg/logging/
+	../pulumi-library/go/pkg/network_firewall_policy/
+	../pulumi-library/go/pkg/network_peering/
 	../pulumi-library/go/pkg/networking/
 	../pulumi-library/go/pkg/policy/
+	../pulumi-library/go/pkg/private_service_connect/
 	../pulumi-library/go/pkg/project/
+	../pulumi-library/go/pkg/pubsub/
 	../pulumi-library/go/pkg/security/
 	../pulumi-library/go/pkg/storage/
 	../pulumi-library/go/pkg/vpc_sc/

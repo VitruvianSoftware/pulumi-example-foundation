@@ -24,6 +24,9 @@ import (
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/serviceaccount"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/storage"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
+
+	parentiammember "foundation-0-bootstrap/modules/parent-iam-member"
+	parentiamremoverole "foundation-0-bootstrap/modules/parent-iam-remove-role"
 )
 
 // deployIAM creates the granular service accounts and assigns least-privilege
@@ -45,10 +48,10 @@ func deployIAM(ctx *pulumi.Context, cfg *Config, seed *SeedProject, cicd *CICDPr
 	sas := make(map[string]*serviceaccount.Account)
 	for key, desc := range granularSAs {
 		sa, err := serviceaccount.NewAccount(ctx, fmt.Sprintf("sa-terraform-%s", key), &serviceaccount.AccountArgs{
-			Project:                    seed.ProjectID,
-			AccountId:                  pulumi.String(fmt.Sprintf("sa-terraform-%s", key)),
-			DisplayName:                pulumi.String(desc),
-			CreateIgnoreAlreadyExists:  pulumi.Bool(true),
+			Project:                   seed.ProjectID,
+			AccountId:                 pulumi.String(fmt.Sprintf("sa-terraform-%s", key)),
+			DisplayName:               pulumi.String(desc),
+			CreateIgnoreAlreadyExists: pulumi.Bool(true),
 		})
 		if err != nil {
 			return nil, err
@@ -156,10 +159,14 @@ func deployIAM(ctx *pulumi.Context, cfg *Config, seed *SeedProject, cicd *CICDPr
 	}
 
 	for key, roles := range parentRoles {
-		for _, role := range roles {
-			if err := bindParentIAMMember(ctx, fmt.Sprintf("parent-iam-%s-%s", key, roleID(role)), cfg, pulumi.String(role), memberOf(sas[key])); err != nil {
-				return nil, err
-			}
+		_, err := parentiammember.NewParentIamMember(ctx, fmt.Sprintf("parent-iam-%s", key), &parentiammember.ParentIamMemberArgs{
+			ParentType: cfg.ParentType,
+			ParentId:   pulumi.String(cfg.ParentID),
+			Member:     memberOf(sas[key]),
+			Roles:      roles,
+		})
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -181,14 +188,14 @@ func deployIAM(ctx *pulumi.Context, cfg *Config, seed *SeedProject, cicd *CICDPr
 	}
 
 	for key, roles := range seedProjectRoles {
-		for _, role := range roles {
-			if _, err := iam.NewProjectIAMMember(ctx, fmt.Sprintf("seed-iam-%s-%s", key, roleID(role)), &iam.ProjectIAMMemberArgs{
-				ProjectID: seed.ProjectID,
-				Role:      pulumi.String(role),
-				Member:    memberOf(sas[key]),
-			}); err != nil {
-				return nil, err
-			}
+		_, err := parentiammember.NewParentIamMember(ctx, fmt.Sprintf("seed-iam-%s", key), &parentiammember.ParentIamMemberArgs{
+			ParentType: "project",
+			ParentId:   seed.ProjectID,
+			Member:     memberOf(sas[key]),
+			Roles:      roles,
+		})
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -214,14 +221,14 @@ func deployIAM(ctx *pulumi.Context, cfg *Config, seed *SeedProject, cicd *CICDPr
 	}
 
 	for key, roles := range cicdProjectRoles {
-		for _, role := range roles {
-			if _, err := iam.NewProjectIAMMember(ctx, fmt.Sprintf("cicd-iam-%s-%s", key, roleID(role)), &iam.ProjectIAMMemberArgs{
-				ProjectID: cicd.ProjectID,
-				Role:      pulumi.String(role),
-				Member:    memberOf(sas[key]),
-			}); err != nil {
-				return nil, err
-			}
+		_, err := parentiammember.NewParentIamMember(ctx, fmt.Sprintf("cicd-iam-%s", key), &parentiammember.ParentIamMemberArgs{
+			ParentType: "project",
+			ParentId:   cicd.ProjectID,
+			Member:     memberOf(sas[key]),
+			Roles:      roles,
+		})
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -326,7 +333,13 @@ func deployIAM(ctx *pulumi.Context, cfg *Config, seed *SeedProject, cicd *CICDPr
 	// Grant org admins serviceusage.serviceUsageConsumer at the parent level
 	// so they can consume API quota while impersonating pipeline SAs.
 	// Mirrors: org_admin_serviceusage_consumer in TF bootstrap
-	if err := bindParentIAMMember(ctx, "org-admins-serviceusage", cfg, pulumi.String("roles/serviceusage.serviceUsageConsumer"), orgAdminGroupMember); err != nil {
+	_, err := parentiammember.NewParentIamMember(ctx, "org-admins-serviceusage", &parentiammember.ParentIamMemberArgs{
+		ParentType: cfg.ParentType,
+		ParentId:   pulumi.String(cfg.ParentID),
+		Member:     orgAdminGroupMember,
+		Roles:      []string{"roles/serviceusage.serviceUsageConsumer"},
+	})
+	if err != nil {
 		return nil, err
 	}
 
@@ -377,11 +390,12 @@ func deployIAM(ctx *pulumi.Context, cfg *Config, seed *SeedProject, cicd *CICDPr
 		"cicd": cicd.ProjectID,
 	}
 	for projKey, projID := range bootstrapProjects {
-		if _, err := iam.NewProjectIAMBinding(ctx, fmt.Sprintf("remove-editor-%s", projKey), &iam.ProjectIAMBindingArgs{
-			ProjectID: projID,
-			Role:      pulumi.String("roles/editor"),
-			Members:   pulumi.StringArray{}, // empty = remove all editors
-		}); err != nil {
+		_, err := parentiamremoverole.NewParentIamRemoveRole(ctx, fmt.Sprintf("remove-editor-%s", projKey), &parentiamremoverole.ParentIamRemoveRoleArgs{
+			ParentType: "project",
+			ParentId:   projID,
+			Roles:      []string{"roles/editor"},
+		})
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -411,26 +425,6 @@ func deployIAM(ctx *pulumi.Context, cfg *Config, seed *SeedProject, cicd *CICDPr
 	}
 
 	return sas, nil
-}
-
-// bindParentIAMMember creates an additive IAM member binding at either the
-// organization or folder scope, depending on whether the foundation is
-// deployed under a parent folder or at the org root.
-func bindParentIAMMember(ctx *pulumi.Context, name string, cfg *Config, role pulumi.StringInput, member pulumi.StringInput) error {
-	if cfg.ParentType == "organization" {
-		_, err := iam.NewOrganizationIAMMember(ctx, name, &iam.OrganizationIAMMemberArgs{
-			OrgID:  pulumi.String(cfg.ParentID),
-			Role:   role,
-			Member: member,
-		})
-		return err
-	}
-	_, err := iam.NewFolderIAMMember(ctx, name, &iam.FolderIAMMemberArgs{
-		FolderID: pulumi.String(cfg.ParentID),
-		Role:     role,
-		Member:   member,
-	})
-	return err
 }
 
 // bindParentIAMBinding creates an authoritative IAM binding at either the

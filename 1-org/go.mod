@@ -3,10 +3,10 @@ module foundation-1-org
 go 1.26.1
 
 require (
-	github.com/VitruvianSoftware/pulumi-library/go/pkg/logging v0.2.0
-	github.com/VitruvianSoftware/pulumi-library/go/pkg/policy v0.2.0
-	github.com/VitruvianSoftware/pulumi-library/go/pkg/project v0.2.0
-	github.com/VitruvianSoftware/pulumi-library/go/pkg/security v0.2.0
+	github.com/VitruvianSoftware/pulumi-library/go/pkg/logging v0.4.0
+	github.com/VitruvianSoftware/pulumi-library/go/pkg/policy v0.4.0
+	github.com/VitruvianSoftware/pulumi-library/go/pkg/project v0.4.0
+	github.com/VitruvianSoftware/pulumi-library/go/pkg/security v0.4.0
 	github.com/pulumi/pulumi-gcp/sdk/v9 v9.20.0
 	github.com/pulumi/pulumi-random/sdk/v4 v4.19.2
 	github.com/pulumi/pulumi/sdk/v3 v3.231.0

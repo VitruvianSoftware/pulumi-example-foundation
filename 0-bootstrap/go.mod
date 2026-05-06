@@ -3,12 +3,12 @@ module foundation-0-bootstrap
 go 1.26.1
 
 require (
-	github.com/VitruvianSoftware/pulumi-library/go/pkg/bootstrap v0.2.1-0.20260423223700-5d6cb359b7d6
-	github.com/VitruvianSoftware/pulumi-library/go/pkg/cicd v0.2.0
-	github.com/VitruvianSoftware/pulumi-library/go/pkg/group v0.2.0
-	github.com/VitruvianSoftware/pulumi-library/go/pkg/iam v0.2.0
-	github.com/VitruvianSoftware/pulumi-library/go/pkg/project v0.2.0
-	github.com/VitruvianSoftware/pulumi-library/go/pkg/storage v0.2.0
+	github.com/VitruvianSoftware/pulumi-library/go/pkg/bootstrap v0.4.0
+	github.com/VitruvianSoftware/pulumi-library/go/pkg/cicd v0.4.0
+	github.com/VitruvianSoftware/pulumi-library/go/pkg/group v0.4.0
+	github.com/VitruvianSoftware/pulumi-library/go/pkg/iam v0.4.0
+	github.com/VitruvianSoftware/pulumi-library/go/pkg/project v0.4.0
+	github.com/VitruvianSoftware/pulumi-library/go/pkg/storage v0.4.0
 	github.com/pulumi/pulumi-gcp/sdk/v9 v9.20.0
 	github.com/pulumi/pulumi-github/sdk/v6 v6.12.2
 	github.com/pulumi/pulumi/sdk/v3 v3.231.0
