@@ -14,11 +14,18 @@
  * limitations under the License.
  */
 
+// Example: Confidential Space VM deployment with WIF attestation.
+// To enable, remove this build constraint or build with: go build -tags=example
+//
+//go:build example
+
 package main
 
 import (
 	"fmt"
 
+	computeinstance "github.com/VitruvianSoftware/pulumi-library/go/pkg/compute_instance"
+	instancetemplate "github.com/VitruvianSoftware/pulumi-library/go/pkg/instance_template"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/compute"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/iam"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/serviceaccount"
@@ -129,43 +136,43 @@ func deployConfidentialSpace(ctx *pulumi.Context, name string, args *Confidentia
 		return nil, err
 	}
 
-	// 4. Confidential VM — TEE image reference from CI/CD project's Artifact Registry
+	// 4. Confidential VM Template — TEE image reference from CI/CD project's Artifact Registry
 	defaultTeeImageRef := args.CloudBuildProjectID.ToStringOutput().ApplyT(func(cbID string) string {
 		return fmt.Sprintf("%s-docker.pkg.dev/%s/tf-runners/confidential_space_image:latest", args.Region, cbID)
 	}).(pulumi.StringOutput)
 
-	inst, err := compute.NewInstance(ctx, name+"-vm", &compute.InstanceArgs{
-		Project:        args.ProjectID,
-		Name:           pulumi.String("confidential-instance"),
-		MachineType:    pulumi.String(args.ConfidentialMachineType),
-		Zone:           pulumi.String(args.Region + "-a"),
-		MinCpuPlatform: pulumi.String(args.CpuPlatform),
-		ConfidentialInstanceConfig: &compute.InstanceConfidentialInstanceConfigArgs{
-			EnableConfidentialCompute: pulumi.Bool(true),
-			ConfidentialInstanceType:  pulumi.String(args.ConfidentialInstanceType),
-		},
-		ShieldedInstanceConfig: &compute.InstanceShieldedInstanceConfigArgs{
-			EnableSecureBoot:          pulumi.Bool(true),
-			EnableVtpm:                pulumi.Bool(true),
-			EnableIntegrityMonitoring: pulumi.Bool(true),
-		},
-		BootDisk: &compute.InstanceBootDiskArgs{
-			InitializeParams: &compute.InstanceBootDiskInitializeParamsArgs{
-				Image: pulumi.String("projects/confidential-space-images/global/images/family/confidential-space"),
-			},
-		},
-		NetworkInterfaces: compute.InstanceNetworkInterfaceArray{
-			&compute.InstanceNetworkInterfaceArgs{
-				Subnetwork: args.SubnetworkSelfLink,
-			},
-		},
-		ServiceAccount: &compute.InstanceServiceAccountArgs{
-			Email:  args.WorkloadSAEmail,
-			Scopes: pulumi.StringArray{pulumi.String("https://www.googleapis.com/auth/cloud-platform")},
-		},
-		Metadata: pulumi.StringMap{
+	tmpl, err := instancetemplate.NewInstanceTemplate(ctx, name+"-tmpl", &instancetemplate.InstanceTemplateArgs{
+		Project:                  args.ProjectID,
+		NamePrefix:               "confidential-template-",
+		MachineType:              args.ConfidentialMachineType,
+		Region:                   args.Region,
+		MinCpuPlatform:           args.CpuPlatform,
+		EnableConfidentialVm:     true,
+		ConfidentialInstanceType: args.ConfidentialInstanceType,
+		EnableShieldedVm:         true,
+		SourceImageFamily:        "confidential-space",
+		SourceImageProject:       "confidential-space-images",
+		DiskSizeGb:               20,
+		DiskType:                 "pd-ssd",
+		Subnetwork:               args.SubnetworkSelfLink,
+		ServiceAccountEmail:      args.WorkloadSAEmail,
+		ServiceAccountScopes:     []string{"https://www.googleapis.com/auth/cloud-platform"},
+		Metadata: map[string]string{
 			"tee-image-reference": defaultTeeImageRef,
 		},
+	}, pulumi.DependsOn([]pulumi.Resource{wait}))
+	if err != nil {
+		return nil, err
+	}
+
+	// 5. Compute Instance from Template
+	inst, err := computeinstance.NewComputeInstance(ctx, name+"-vm", &computeinstance.ComputeInstanceArgs{
+		ProjectId:        args.ProjectID,
+		Zone:             args.Region + "-a",
+		InstanceName:     "confidential-instance",
+		InstanceTemplate: tmpl.Template.SelfLink,
+		Subnetwork:       args.SubnetworkSelfLink,
+		NumInstances:     1,
 	})
 	if err != nil {
 		return nil, err

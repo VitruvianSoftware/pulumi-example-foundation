@@ -1,0 +1,115 @@
+// Copyright 2026 Vitruvian Software
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// ============================================================================
+// Partner Interconnect — Example
+// ============================================================================
+//
+// This file is an EXAMPLE showing how to provision Partner Interconnect
+// attachments for on-prem connectivity via a service provider. This mirrors
+// the Terraform foundation's `partner_interconnect.tf.example`.
+//
+// To activate:
+// 1. Rename: partner_interconnect.go.example → partner_interconnect.go
+// 2. Update the configuration values below for your environment
+// 3. Call deployPartnerInterconnect() from main.go
+// 4. Run `pulumi up` in each environment stack
+// 5. Contact your service provider to complete the pairing
+//
+// ============================================================================
+// PREREQUISITES:
+// - A supported service provider must be selected
+// - Interconnect locations must be known
+// ============================================================================
+
+package main
+
+import (
+	"fmt"
+
+	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/compute"
+	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
+)
+
+// PartnerInterconnectConfig holds the configuration for Partner Interconnect.
+type PartnerInterconnectConfig struct {
+	AttachmentProjectID string
+	VPCName             string
+	Preactivate         bool
+	Region1             string
+	Region1Router1Name  pulumi.StringInput
+	Region1Router2Name  pulumi.StringInput
+	Region1Interconnect1Location string
+	Region1Interconnect2Location string
+	Region2             string
+	Region2Router1Name  pulumi.StringInput
+	Region2Router2Name  pulumi.StringInput
+	Region2Interconnect1Location string
+	Region2Interconnect2Location string
+}
+
+// deployPartnerInterconnect provisions 4x Partner Interconnect attachments
+// (2 per region, for redundancy). After deployment, contact your service provider
+// to complete the pairing.
+func deployPartnerInterconnect(ctx *pulumi.Context, name string, cfg *PartnerInterconnectConfig) error {
+	// Region 1, Router 1
+	_, err := compute.NewInterconnectAttachment(ctx, fmt.Sprintf("%s-r1-attach1", name), &compute.InterconnectAttachmentArgs{
+		Project:                pulumi.String(cfg.AttachmentProjectID),
+		Region:                 pulumi.String(cfg.Region1),
+		Router:                 cfg.Region1Router1Name,
+		Name:                   pulumi.Sprintf("%s-r1-a1", cfg.VPCName),
+		EdgeAvailabilityDomain: pulumi.String("AVAILABILITY_DOMAIN_1"),
+		Type:                   pulumi.String("PARTNER"),
+	})
+	if err != nil {
+		return err
+	}
+
+	// Region 1, Router 2
+	_, err = compute.NewInterconnectAttachment(ctx, fmt.Sprintf("%s-r1-attach2", name), &compute.InterconnectAttachmentArgs{
+		Project:                pulumi.String(cfg.AttachmentProjectID),
+		Region:                 pulumi.String(cfg.Region1),
+		Router:                 cfg.Region1Router2Name,
+		Name:                   pulumi.Sprintf("%s-r1-a2", cfg.VPCName),
+		EdgeAvailabilityDomain: pulumi.String("AVAILABILITY_DOMAIN_2"),
+		Type:                   pulumi.String("PARTNER"),
+	})
+	if err != nil {
+		return err
+	}
+
+	// Region 2, Router 1
+	_, err = compute.NewInterconnectAttachment(ctx, fmt.Sprintf("%s-r2-attach1", name), &compute.InterconnectAttachmentArgs{
+		Project:                pulumi.String(cfg.AttachmentProjectID),
+		Region:                 pulumi.String(cfg.Region2),
+		Router:                 cfg.Region2Router1Name,
+		Name:                   pulumi.Sprintf("%s-r2-a1", cfg.VPCName),
+		EdgeAvailabilityDomain: pulumi.String("AVAILABILITY_DOMAIN_1"),
+		Type:                   pulumi.String("PARTNER"),
+	})
+	if err != nil {
+		return err
+	}
+
+	// Region 2, Router 2
+	_, err = compute.NewInterconnectAttachment(ctx, fmt.Sprintf("%s-r2-attach2", name), &compute.InterconnectAttachmentArgs{
+		Project:                pulumi.String(cfg.AttachmentProjectID),
+		Region:                 pulumi.String(cfg.Region2),
+		Router:                 cfg.Region2Router2Name,
+		Name:                   pulumi.Sprintf("%s-r2-a2", cfg.VPCName),
+		EdgeAvailabilityDomain: pulumi.String("AVAILABILITY_DOMAIN_2"),
+		Type:                   pulumi.String("PARTNER"),
+	})
+	return err
+}

@@ -1,0 +1,190 @@
+// Copyright 2026 Vitruvian Software
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// ============================================================================
+// Jenkins CI/CD Provider — Example
+// ============================================================================
+//
+// This file is an EXAMPLE showing how to replace the default GitHub Actions
+// CI/CD provider with Jenkins on GCE.
+// This mirrors the Terraform foundation's `build_jenkins.tf.example`.
+//
+// To use Jenkins instead of GitHub Actions:
+//
+// 1. Rename this file: build_jenkins.go.example → build_jenkins.go
+// 2. Remove or rename: build_github_actions.go → build_github_actions.go.bak
+// 3. Update main.go to call deployJenkinsBuild instead of deployGitHubActionsBuild
+// 4. Run `pulumi up` to provision the Jenkins infrastructure.
+//
+// ============================================================================
+
+package main
+
+import (
+	"fmt"
+
+	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/compute"
+	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/organizations"
+	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/projects"
+	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/serviceaccount"
+	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/storage"
+	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
+)
+
+// JenkinsBuildOutputs holds the outputs from Jenkins provisioning.
+type JenkinsBuildOutputs struct {
+	CICDProjectID pulumi.StringOutput
+}
+
+// deployJenkinsBuild provisions the infrastructure for a Jenkins CI/CD agent
+// running on Google Compute Engine. This includes the project, network, NAT,
+// GCE instance, and IAM bindings.
+func deployJenkinsBuild(ctx *pulumi.Context, cfg *Config, sas map[string]*serviceaccount.Account) (*JenkinsBuildOutputs, error) {
+	outputs := &JenkinsBuildOutputs{}
+
+	// Create CICD Project
+	projectPrefix := cfg.ProjectPrefix
+	if projectPrefix == "" {
+		projectPrefix = "prj"
+	}
+	cicdProject, err := projects.NewProject(ctx, "cicd-project", &projects.ProjectArgs{
+		ProjectId:      pulumi.String(fmt.Sprintf("%s-b-cicd", projectPrefix)),
+		Name:           pulumi.String(fmt.Sprintf("%s-b-cicd", projectPrefix)),
+		FolderId:       pulumi.String(cfg.FolderID),
+		BillingAccount: pulumi.String(cfg.BillingAccount),
+	})
+	if err != nil {
+		return nil, err
+	}
+	outputs.CICDProjectID = cicdProject.ProjectId
+
+	// Network & Subnet
+	network, err := compute.NewNetwork(ctx, "jenkins-agents-vpc", &compute.NetworkArgs{
+		Project:               cicdProject.ProjectId,
+		Name:                  pulumi.String("vpc-b-jenkinsagents"),
+		AutoCreateSubnetworks: pulumi.Bool(false),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	subnet, err := compute.NewSubnetwork(ctx, "jenkins-agents-subnet", &compute.SubnetworkArgs{
+		Project:     cicdProject.ProjectId,
+		Name:        pulumi.Sprintf("sb-b-jenkinsagents-%s", cfg.DefaultRegion),
+		Region:      pulumi.String(cfg.DefaultRegion),
+		Network:     network.SelfLink,
+		IpCidrRange: pulumi.String("10.10.10.0/24"), // Example CIDR
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Cloud NAT for the Agent to reach the internet
+	router, err := compute.NewRouter(ctx, "nat-router", &compute.RouterArgs{
+		Project: cicdProject.ProjectId,
+		Name:    pulumi.Sprintf("cr-jenkinsagents-%s-nat-router", cfg.DefaultRegion),
+		Region:  pulumi.String(cfg.DefaultRegion),
+		Network: network.SelfLink,
+		Bgp: &compute.RouterBgpArgs{
+			Asn: pulumi.Int(64514),
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = compute.NewRouterNat(ctx, "nat-config", &compute.RouterNatArgs{
+		Project:                         cicdProject.ProjectId,
+		Name:                            pulumi.Sprintf("rn-jenkinsagents-%s-egress", cfg.DefaultRegion),
+		Router:                          router.Name,
+		Region:                          pulumi.String(cfg.DefaultRegion),
+		NatIpAllocateOption:             pulumi.String("AUTO_ONLY"),
+		SourceSubnetworkIpRangesToNat:   pulumi.String("ALL_SUBNETWORKS_ALL_IP_RANGES"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Jenkins Agent Service Account
+	agentSA, err := serviceaccount.NewAccount(ctx, "jenkins-agent-sa", &serviceaccount.AccountArgs{
+		Project:     cicdProject.ProjectId,
+		AccountId:   pulumi.String("sa-jenkins-agent"),
+		DisplayName: pulumi.String("Jenkins Agent Service Account"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Jenkins Agent GCE Instance
+	_, err = compute.NewInstance(ctx, "jenkins-agent-instance", &compute.InstanceArgs{
+		Project:     cicdProject.ProjectId,
+		Name:        pulumi.String("jenkins-agent-gce"),
+		MachineType: pulumi.String("n1-standard-4"),
+		Zone:        pulumi.String(cfg.DefaultRegion + "-a"),
+		BootDisk: &compute.InstanceBootDiskArgs{
+			InitializeParams: &compute.InstanceBootDiskInitializeParamsArgs{
+				Image: pulumi.String("debian-cloud/debian-11"),
+				Size:  pulumi.Int(20),
+			},
+		},
+		NetworkInterfaces: compute.InstanceNetworkInterfaceArray{
+			&compute.InstanceNetworkInterfaceArgs{
+				Subnetwork: subnet.SelfLink,
+			},
+		},
+		ServiceAccount: &compute.InstanceServiceAccountArgs{
+			Email:  agentSA.Email,
+			Scopes: pulumi.StringArray{pulumi.String("https://www.googleapis.com/auth/cloud-platform")},
+		},
+		// Metadata startup script would go here...
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Grant roles/browser to the Jenkins SA at the Org level
+	_, err = organizations.NewIAMMember(ctx, "jenkins-sa-org-browser", &organizations.IAMMemberArgs{
+		OrgId:  pulumi.String(cfg.OrgID),
+		Role:   pulumi.String("roles/browser"),
+		Member: pulumi.Sprintf("serviceAccount:%s", agentSA.Email),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Allow Jenkins SA to impersonate the Terraform environment SAs
+	for _, sa := range sas {
+		_, err = serviceaccount.NewIAMMember(ctx, fmt.Sprintf("jenkins-impersonate-%s", sa.Name), &serviceaccount.IAMMemberArgs{
+			ServiceAccountId: sa.Name,
+			Role:             pulumi.String("roles/iam.serviceAccountTokenCreator"),
+			Member:           pulumi.Sprintf("serviceAccount:%s", agentSA.Email),
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Artifacts Bucket
+	_, err = storage.NewBucket(ctx, "jenkins-artifacts", &storage.BucketArgs{
+		Project:                  cicdProject.ProjectId,
+		Name:                     pulumi.Sprintf("bkt-%s-jenkins-artifacts", projectPrefix),
+		Location:                 pulumi.String(cfg.DefaultRegion),
+		UniformBucketLevelAccess: pulumi.Bool(true),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return outputs, nil
+}

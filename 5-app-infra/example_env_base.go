@@ -14,14 +14,20 @@
  * limitations under the License.
  */
 
+// Example: env_base compute instance deployment.
+// To enable, remove this build constraint or build with: go build -tags=example
+//
+//go:build example
+
 package main
 
 import (
 	"fmt"
 
-	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/compute"
 	"github.com/pulumi/pulumi-gcp/sdk/v9/go/gcp/serviceaccount"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
+	"github.com/VitruvianSoftware/pulumi-library/go/pkg/compute_instance"
+	"github.com/VitruvianSoftware/pulumi-library/go/pkg/instance_template"
 )
 
 // EnvBaseArgs configures a standard Compute Instance deployment,
@@ -68,51 +74,44 @@ func deployEnvBase(ctx *pulumi.Context, name string, args *EnvBaseArgs) (*EnvBas
 		return nil, err
 	}
 
-	// 2. Compute Instance
-	instanceArgs := &compute.InstanceArgs{
-		Project:     args.ProjectID,
-		Name:        pulumi.String(fmt.Sprintf("%s-%s", hostname, args.ProjectSuffix)),
-		MachineType: pulumi.String("f1-micro"),
-		Zone:        pulumi.String(args.Region + "-a"),
-		BootDisk: &compute.InstanceBootDiskArgs{
-			InitializeParams: &compute.InstanceBootDiskInitializeParamsArgs{
-				Image: pulumi.String("debian-cloud/debian-11"),
-			},
+	// 2. Instance Template
+	tmpl, err := instance_template.NewInstanceTemplate(ctx, name+"-tmpl", &instance_template.InstanceTemplateArgs{
+		Project:              args.ProjectID,
+		Region:               args.Region,
+		MachineType:          "f1-micro",
+		SourceImage:          "debian-cloud/debian-11",
+		Network:              pulumi.String(""),
+		Subnetwork:           args.SubnetworkSelfLink,
+		ServiceAccountEmail:  sa.Email,
+		ServiceAccountScopes: []string{"https://www.googleapis.com/auth/compute"},
+		Metadata: map[string]string{
+			"block-project-ssh-keys": "true",
 		},
-		NetworkInterfaces: compute.InstanceNetworkInterfaceArray{
-			&compute.InstanceNetworkInterfaceArgs{
-				Subnetwork: args.SubnetworkSelfLink,
-			},
-		},
-		ServiceAccount: &compute.InstanceServiceAccountArgs{
-			Email: sa.Email,
-			// upstream: scopes = ["compute-rw"]
-			Scopes: pulumi.StringArray{pulumi.String("https://www.googleapis.com/auth/compute")},
-		},
-		Metadata: pulumi.StringMap{
-			"block-project-ssh-keys": pulumi.String("true"),
-		},
-	}
-
-	// IAP firewall tags — applied via params.resource_manager_tags, matching
-	// the upstream TF vm module's resource_manager_tags variable which maps
-	// to the same google_compute_instance params block.
-	if args.IAPFirewallTags != nil {
-		instanceArgs.Params = &compute.InstanceParamsArgs{
-			ResourceManagerTags: args.IAPFirewallTags,
-		}
-	}
-
-	inst, err := compute.NewInstance(ctx, name+"-inst", instanceArgs)
+	})
 	if err != nil {
 		return nil, err
 	}
 
+	// 3. Compute Instance
+	inst, err := compute_instance.NewComputeInstance(ctx, name+"-inst", &compute_instance.ComputeInstanceArgs{
+		Project:          args.ProjectID,
+		Zone:             args.Region + "-a",
+		Hostname:         fmt.Sprintf("%s-%s", hostname, args.ProjectSuffix),
+		InstanceTemplate: tmpl.Template.SelfLink,
+		NumInstances:     1,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Extract the single instance for outputs
+	instance := inst.Instances[0]
+
 	return &EnvBaseResult{
-		InstanceSelfLink: inst.SelfLink,
-		InstanceName:     inst.Name,
-		InstanceZone:     inst.Zone,
-		InstanceDetails: pulumi.All(inst.Name, inst.Zone, inst.SelfLink).ApplyT(func(args []interface{}) map[string]interface{} {
+		InstanceSelfLink: instance.SelfLink,
+		InstanceName:     instance.Name,
+		InstanceZone:     instance.Zone,
+		InstanceDetails: pulumi.All(instance.Name, instance.Zone, instance.SelfLink).ApplyT(func(args []interface{}) map[string]interface{} {
 			return map[string]interface{}{
 				"name":     args[0],
 				"zone":     args[1],

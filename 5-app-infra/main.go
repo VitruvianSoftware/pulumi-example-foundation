@@ -14,6 +14,14 @@
  * limitations under the License.
  */
 
+// 5-app-infra is the scaffold for deploying application infrastructure.
+//
+// This file provides the project scaffold (stack references, config loading).
+// Actual compute workloads (VMs, confidential space) are defined in the
+// example_*.go files which are excluded from compilation by default.
+//
+// To enable example workloads, remove the //go:build example constraint
+// from the example files, or build with: go build -tags=example
 package main
 
 import (
@@ -37,7 +45,7 @@ func main() {
 		}
 
 		// 2. Stack Reference: 0-bootstrap (shared / common — not per-environment)
-		bootstrapStack, err := pulumi.NewStackReference(ctx, "bootstrap", &pulumi.StackReferenceArgs{
+		_, err = pulumi.NewStackReference(ctx, "bootstrap", &pulumi.StackReferenceArgs{
 			Name: pulumi.String(cfg.BootstrapStackName),
 		})
 		if err != nil {
@@ -46,107 +54,12 @@ func main() {
 
 		// --- Resolve outputs from 4-projects ---
 		appProjectID := projStack.GetStringOutput(pulumi.String("shared_vpc_project"))
-		peeringProjectID := projStack.GetStringOutput(pulumi.String("peering_project"))
-		confSpaceProjectID := projStack.GetStringOutput(pulumi.String("confidential_space_project"))
-		confSpaceProjectNumber := projStack.GetStringOutput(pulumi.String("confidential_space_project_number"))
-		confSpaceWorkloadSA := projStack.GetStringOutput(pulumi.String("confidential_space_workload_sa"))
-		peeringSubnetSelfLink := projStack.GetStringOutput(pulumi.String("peering_subnetwork_self_link"))
-		networkProjectID := projStack.GetStringOutput(pulumi.String("shared_vpc_project"))
 
-		// IAP firewall tags come as a map[string]interface{} from stack references;
-		// convert to map[string]string for the Compute Instance params.
-		iapFirewallTags := projStack.GetOutput(pulumi.String("iap_firewall_tags")).ApplyT(func(v interface{}) map[string]string {
-			m := make(map[string]string)
-			if v == nil {
-				return m
-			}
-			if vm, ok := v.(map[string]interface{}); ok {
-				for key, val := range vm {
-					m[key] = fmt.Sprintf("%v", val)
-				}
-			}
-			return m
-		}).(pulumi.StringMapOutput)
-
-		// --- Resolve outputs from 0-bootstrap ---
-		cicdProjectID := bootstrapStack.GetStringOutput(pulumi.String("cloudbuild_project_id"))
-
-		// Reconstruct SVPC subnet self link from deterministic naming convention
-		svpcSubnetSelfLink := pulumi.Sprintf(
-			"projects/%s/regions/%s/subnetworks/sb-%s-svpc-%s",
-			networkProjectID, cfg.Region, cfg.EnvCode, cfg.Region,
-		)
-
-		// 3. Deploy SVPC Instance (upstream: module "gce_instance" with project_suffix = "sample-svpc")
-		svpcResult, err := deployEnvBase(ctx, "sample-svpc", &EnvBaseArgs{
-			Env:                cfg.Env,
-			BusinessUnit:       cfg.BusinessCode,
-			ProjectSuffix:      "sample-svpc",
-			Hostname:           "example-app",
-			ProjectID:          appProjectID,
-			Region:             cfg.Region,
-			SubnetworkSelfLink: svpcSubnetSelfLink,
-			IAPFirewallTags:    nil, // No tags for SVPC (upstream: null)
-		})
-		if err != nil {
-			return err
-		}
-
-		// 4. Deploy Peering Instance (upstream: module "peering_gce_instance" with project_suffix = "sample-peering")
-		_, err = deployEnvBase(ctx, "sample-peering", &EnvBaseArgs{
-			Env:                cfg.Env,
-			BusinessUnit:       cfg.BusinessCode,
-			ProjectSuffix:      "sample-peering",
-			Hostname:           "example-app",
-			ProjectID:          peeringProjectID,
-			Region:             cfg.Region,
-			SubnetworkSelfLink: peeringSubnetSelfLink,
-			IAPFirewallTags:    iapFirewallTags,
-		})
-		if err != nil {
-			return err
-		}
-
-		// 5. Deploy Confidential Space (upstream: module "confidential_space")
-		var confResult *ConfidentialSpaceResult
-		if cfg.ConfidentialImageDigest != "" {
-			confResult, err = deployConfidentialSpace(ctx, "conf-space", &ConfidentialSpaceArgs{
-				Env:                      cfg.Env,
-				BusinessUnit:             cfg.BusinessCode,
-				ProjectID:                confSpaceProjectID,
-				ProjectNumber:            confSpaceProjectNumber,
-				Region:                   cfg.Region,
-				SubnetworkSelfLink:       svpcSubnetSelfLink,
-				WorkloadSAEmail:          confSpaceWorkloadSA,
-				ConfidentialImageDigest:  cfg.ConfidentialImageDigest,
-				ConfidentialMachineType:  "n2d-standard-2",
-				ConfidentialInstanceType: "SEV",
-				CpuPlatform:             "AMD Milan",
-				CloudBuildProjectID:      cicdProjectID,
-			})
-			if err != nil {
-				return err
-			}
-		}
-
-		// 6. Exports — matching TF 5-app-infra/business_unit_1/{env}/outputs.tf
+		// 3. Scaffold Exports — matching TF 5-app-infra outputs structure
+		// The project scaffold exports are always available. Compute workload
+		// exports are added by the example files when enabled.
 		ctx.Export("project_id", appProjectID)
 		ctx.Export("region", pulumi.String(cfg.Region))
-		ctx.Export("instances_self_links", svpcResult.InstanceSelfLink)
-		ctx.Export("instances_names", svpcResult.InstanceName)
-		ctx.Export("instances_zones", svpcResult.InstanceZone)
-		ctx.Export("instances_details", svpcResult.InstanceDetails)
-		ctx.Export("available_zones", pulumi.ToStringArray([]string{cfg.Region + "-a"}))
-
-		if confResult != nil {
-			ctx.Export("confidential_space_project_id", confSpaceProjectID)
-			ctx.Export("confidential_space_project_number", confSpaceProjectNumber)
-			ctx.Export("workload_identity_pool_id", confResult.WorkloadPoolID)
-			ctx.Export("workload_pool_provider_id", confResult.WorkloadPoolProviderID)
-			ctx.Export("confidential_instances_names", confResult.InstanceName)
-			ctx.Export("confidential_instances_zones", confResult.InstanceZone)
-			ctx.Export("confidential_available_zones", pulumi.ToStringArray([]string{cfg.Region + "-a"}))
-		}
 
 		return nil
 	})

@@ -29,30 +29,6 @@ func TestAppInfraConfigStruct(t *testing.T) {
 	assert.Equal(t, "us-central1", cfg.Region)
 }
 
-// TestEnvBaseArgsStruct validates the EnvBaseArgs input struct.
-func TestEnvBaseArgsStruct(t *testing.T) {
-	args := &EnvBaseArgs{}
-	assert.NotNil(t, args)
-}
-
-// TestEnvBaseResultStruct validates the EnvBaseResult output struct.
-func TestEnvBaseResultStruct(t *testing.T) {
-	result := &EnvBaseResult{}
-	assert.NotNil(t, result)
-}
-
-// TestConfidentialSpaceArgsStruct validates ConfidentialSpaceArgs.
-func TestConfidentialSpaceArgsStruct(t *testing.T) {
-	args := &ConfidentialSpaceArgs{}
-	assert.NotNil(t, args)
-}
-
-// TestConfidentialSpaceResultStructAppInfra validates ConfidentialSpaceResult.
-func TestConfidentialSpaceResultStructAppInfra(t *testing.T) {
-	result := &ConfidentialSpaceResult{}
-	assert.NotNil(t, result)
-}
-
 // TestDefaultRegion validates the default region constant.
 func TestDefaultRegion(t *testing.T) {
 	cfg := &AppInfraConfig{Region: ""}
