@@ -3,6 +3,8 @@ module foundation-5-app-infra
 go 1.26.1
 
 require (
+	github.com/VitruvianSoftware/pulumi-library/go/pkg/compute_instance v0.2.0
+	github.com/VitruvianSoftware/pulumi-library/go/pkg/instance_template v0.2.1
 	github.com/pulumi/pulumi-gcp/sdk/v9 v9.20.0
 	github.com/pulumi/pulumi/sdk/v3 v3.231.0
 	github.com/pulumiverse/pulumi-time/sdk v0.1.0
@@ -13,8 +15,6 @@ require (
 	dario.cat/mergo v1.0.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/ProtonMail/go-crypto v1.1.6 // indirect
-	github.com/VitruvianSoftware/pulumi-library/go/pkg/compute_instance v0.2.0 // indirect
-	github.com/VitruvianSoftware/pulumi-library/go/pkg/instance_template v0.2.0 // indirect
 	github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da // indirect
 	github.com/agext/levenshtein v1.2.3 // indirect
 	github.com/apparentlymart/go-textseg/v13 v13.0.0 // indirect
@@ -124,4 +124,3 @@ require (
 	lukechampine.com/frand v1.4.2 // indirect
 )
 
-replace github.com/VitruvianSoftware/pulumi-library/go => ../../pulumi-library/go
